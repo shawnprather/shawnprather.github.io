@@ -1,9 +1,21 @@
 // A small working web browser inside the page: the reward for 10 trophies.
-// It opens on this very site, so you can break a page inside the page.
+// It opens on this very site, whose own browser opens the site again, and so on:
+// browsers stack as deep as you care to click.
 
 import { makeDraggable } from './ui.js';
 
-const SELF = location.origin + location.pathname;
+// How many browsers deep this copy of the page is (0 = the real tab).
+export const DEPTH = (() => {
+  let d = 0, w = window;
+  try { while (w !== w.parent && d < 100) { w = w.parent; d++; } } catch { /* cross-origin parent */ }
+  return d;
+})();
+
+const BASE = location.origin + location.pathname;
+// Every level needs its own address: browsers refuse to load a page inside a
+// copy of itself with the exact same URL (Chrome stops at the second level).
+const self = () => `${BASE}?level=${DEPTH + 1}&t=${Date.now().toString(36)}`;
+const SELF = 'self';
 const LINKS = [
   ['This site', SELF],
   ['shawnprather.dev', 'https://shawnprather.dev/'],
@@ -21,14 +33,15 @@ export function openBrowser() {
     return;
   }
   win = document.createElement('div');
-  win.className = 'browser-win';
+  // Inside another browser, fill the little page so the stack stays usable.
+  win.className = DEPTH ? 'browser-win nested' : 'browser-win';
   win.setAttribute('role', 'dialog');
   win.setAttribute('aria-label', 'Web browser');
   win.innerHTML = `
     <div class="bw-title">
       <button type="button" class="bw-close" aria-label="Close browser"></button>
       <span class="bw-dot"></span><span class="bw-dot"></span>
-      <span class="bw-name">Browser (inside a browser)</span>
+      <span class="bw-name">${DEPTH ? `Browser, ${DEPTH + 1} levels deep` : 'Browser (inside your browser)'}</span>
     </div>
     <form class="bw-bar">
       <button type="button" data-go="back" aria-label="Back">&larr;</button>
@@ -48,10 +61,11 @@ export function openBrowser() {
   let at = -1;
 
   const show = (url) => {
-    input.value = url === SELF ? 'shawnprather.github.io (this site!)' : url;
+    input.value = url.startsWith(BASE) ? `this site (level ${DEPTH + 1})` : url;
     frame.src = url;
   };
   const go = (url) => {
+    if (url === SELF) url = self();
     history.splice(at + 1);
     history.push(url);
     at = history.length - 1;
@@ -84,7 +98,7 @@ export function openBrowser() {
 
 function toURL(text) {
   const t = text.trim();
-  if (!t || t.startsWith('shawnprather.github.io')) return SELF;
+  if (!t || /^(this site|shawnprather\.github\.io\/?$)/i.test(t)) return SELF;
   if (/^https?:\/\//i.test(t)) return t;
   if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(t)) return 'https://' + t;
   return 'https://en.wikipedia.org/w/index.php?search=' + encodeURIComponent(t);

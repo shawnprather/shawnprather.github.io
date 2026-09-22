@@ -2,7 +2,7 @@
 // and achievements that pop up as you break things.
 
 import { clamp } from './world.js';
-import { openBrowser } from './browser.js';
+import { openBrowser as showBrowser, DEPTH } from './browser.js';
 
 const { Bodies, Composite, Events } = window.Matter;
 const STORE_KEY = 'sp-achievements';
@@ -33,7 +33,9 @@ const ACHIEVEMENTS = [
   ['underpar', 'Under par', 'Finished a hole under par.'],
   ['ascii', 'Plain text', 'Turned the page into ASCII.'],
   ['browser', 'Browserception', `Earned ${BROWSER_AT} trophies and got a web browser inside the web browser.`],
-  ['nested', 'Browsers all the way down', 'Opened this site inside its own browser.'],
+  ['nested', 'Site-ception', 'Loaded this site inside its own browser.'],
+  ['stacked', 'Browser in a browser', 'Opened the browser from inside the browser.'],
+  ['turtles', 'Turtles all the way down', 'Stacked browsers 5 levels deep.'],
   ['tttfound', 'Hidden game', 'Found the hidden game. (A certain dot is worth three clicks.)'],
   ['tttwin', 'Three in a row', 'Beat the bot at tic-tac-toe.'],
   ['tttdraw', "Cat's game", 'Tied the bot at tic-tac-toe.'],
@@ -88,7 +90,31 @@ export class Game {
     world.on('ttt-found', () => this.unlock('tttfound'));
     world.on('ttt-win', () => this.unlock('tttwin'));
     world.on('ttt-draw', () => this.unlock('tttdraw'));
-    if (window.self !== window.top) this.unlock('nested');
+    if (DEPTH >= 1) this.unlock('nested');
+    if (DEPTH >= 5) this.unlock('turtles');
+
+    // Copies of the site in the browser window share these achievements. When one
+    // of them unlocks something, the real tab shows it too.
+    addEventListener('storage', (e) => {
+      if (e.key !== STORE_KEY) return;
+      for (const id of load()) {
+        if (this.unlocked.has(id)) continue;
+        this.unlocked.add(id);
+        const a = ACHIEVEMENTS.find((x) => x.id === id);
+        if (a && DEPTH === 0) this.toast(`Achievement: ${a.title}`, `${a.desc} (Unlocked inside the browser.)`);
+      }
+      this.renderPanel();
+    });
+
+    // Once the browser is unlocked, a button opens it from the normal page. Inside
+    // a browser, the same button opens the next one down.
+    this.launcher = document.createElement('button');
+    this.launcher.type = 'button';
+    this.launcher.className = 'browser-launch';
+    this.launcher.textContent = DEPTH ? `Open a browser, level ${DEPTH + 1}` : 'Open the browser';
+    this.launcher.addEventListener('click', () => this.openBrowser());
+    document.body.append(this.launcher);
+    this.renderPanel();
     world.on('planet', (n) => { if (n >= 3) this.unlock('threebody'); });
     world.on('rebuild-start', () => { this.removeHoop(); this.panel.hidden = true; });
     world.on('rebuilt', () => this.unlock('undo'));
@@ -109,11 +135,16 @@ export class Game {
     this.toast(`Achievement: ${a.title}`, a.desc);
     this.renderPanel();
     if (id === 'browser') {
-      this.toast('You unlocked a web browser', 'It lives in the Trophies panel. Try opening this site inside it.');
-      openBrowser();
+      this.toast('You unlocked a web browser', 'Reopen it from the Trophies panel. The site inside has its own browser too.');
+      this.openBrowser();
     }
     const earned = [...this.unlocked].filter((x) => x !== 'browser').length;
     if (earned >= BROWSER_AT) this.unlock('browser');
+  }
+
+  openBrowser() {
+    showBrowser();
+    if (DEPTH >= 1) this.unlock('stacked');
   }
 
   toast(title, desc) {
@@ -156,7 +187,7 @@ export class Game {
     this.browserBtn.type = 'button';
     this.browserBtn.className = 'panel-browser';
     this.browserBtn.textContent = 'Open the browser';
-    this.browserBtn.addEventListener('click', () => openBrowser());
+    this.browserBtn.addEventListener('click', () => this.openBrowser());
     this.list = document.createElement('ul');
     this.panel.append(h, this.browserBtn, this.list);
     document.body.append(this.panel);
@@ -165,6 +196,7 @@ export class Game {
 
   renderPanel() {
     if (this.trophyBtn) this.trophyBtn.textContent = `Trophies ${this.unlocked.size}/${ACHIEVEMENTS.length}`;
+    if (this.launcher) this.launcher.hidden = !this.unlocked.has('browser');
     if (!this.list) return;
     this.browserBtn.hidden = !this.unlocked.has('browser');
     this.list.replaceChildren(...ACHIEVEMENTS.map((a) => {
