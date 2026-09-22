@@ -26,6 +26,7 @@ export class Orbits {
     this.active = true;
     document.documentElement.classList.add('orbiting');
     this.accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    this.showLegend();
     this.placeSun();
 
     const live = w.liveItems();
@@ -67,6 +68,8 @@ export class Orbits {
     this.tracking = null;
     this.trails.clear();
     document.documentElement.classList.remove('orbiting');
+    this.legend?.remove();
+    this.legend = null;
     const w = this.world;
     if (this.sun) {
       Composite.remove(w.engine.world, this.sun.body);
@@ -86,10 +89,28 @@ export class Orbits {
     w.emit('orbit-off');
   }
 
+  // Orbit mode is not obvious, so it explains itself for as long as it is on.
+  showLegend() {
+    const el = document.createElement('div');
+    el.className = 'orbit-legend';
+    el.innerHTML = `
+      <strong>Solar system</strong>
+      <ul>
+        <li>The orange labels (About, Projects, Experience, Contact) are planets. Click one to fly to that section.</li>
+        <li>Drag and fling anything to knock it into a new orbit.</li>
+        <li>Press <kbd>O</kbd> or the Solar system button again to turn gravity back on.</li>
+      </ul>`;
+    document.body.append(el);
+    this.legend = el;
+  }
+
   placeSun() {
     const { W, H } = this.world;
-    const cx = W / 2, cy = H / 2 + 24; // a little low, to clear the toolbar
-    const reach = Math.min(cx, W - cx, cy, H - cy) - 4;
+    // Fit the system between the toolbar and the legend card.
+    const top = (document.querySelector('.toolbar')?.getBoundingClientRect().bottom || 0) + 8;
+    const bottom = (this.legend?.getBoundingClientRect().top || H) - 8;
+    const cx = W / 2, cy = (top + bottom) / 2;
+    const reach = Math.max(80, Math.min(cx, (bottom - top) / 2));
     const R = clamp(reach * 0.14, 24, 56);
     const rMax = Math.max(R + 60, reach);
     // Pick GM so the outermost orbit takes about 16 seconds.

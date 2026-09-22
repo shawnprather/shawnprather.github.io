@@ -1,11 +1,19 @@
 // The particle layer: thousands of tiny pieces that Matter.js could not handle.
-// Shards fly with a hand-rolled integrator; once they come to rest they turn into
-// grains in a falling-sand grid that piles up against whichever wall gravity points at.
+//
+// Two kinds of sand live here:
+//  - flying grains: free particles with velocity (shards, dust, anything falling)
+//  - resting grains: cells in a grid that piles up against whichever wall gravity
+//    points at, and slides down slopes
+// A resting grain with nothing under it becomes a flying grain again, so sand pours
+// and accelerates instead of sliding as a rigid sheet. The physics pieces are drawn
+// into a mask every step, so sand lands on them and gets pushed aside by them.
+//
 // Everything is drawn into one small pixel buffer that gets scaled up, so the cost
 // is a single putImageData per frame no matter how much sand there is.
 
 import { G_STEP } from './world.js';
 
+const { Composite } = window.Matter;
 const MAX = 26000;
 const CRUMBLE_STEPS = 50;
 
@@ -31,6 +39,7 @@ export class Particles {
     this.frame = 0;
     this.crumbling = [];
     this.overlays = [];
+    this.maskBodies = [];
     this.out = [0, 0];
 
     world.on('broken', () => { document.body.append(this.canvas); this.resize(); });
@@ -53,10 +62,14 @@ export class Particles {
     this.dpr = Math.min(2, devicePixelRatio || 1);
     this.canvas.width = Math.round(W * this.dpr);
     this.canvas.height = Math.round(H * this.dpr);
-    this.C = W * H > 2.6e6 ? 4 : 3;
+    // A grain is a whole number of device pixels, so scaled displays (125%, 150%)
+    // don't draw some grains wider than others and make the sand shimmer.
+    this.D = Math.max(2, Math.round((W * H > 2.6e6 ? 4 : 3) * this.dpr));
+    this.C = this.D / this.dpr;
     this.gw = Math.ceil(W / this.C);
     this.gh = Math.ceil(H / this.C);
     this.grid = new Uint32Array(this.gw * this.gh);
+    this.mask = new Uint8Array(this.gw * this.gh);
     this.sandCount = 0;
     this.pix.width = this.gw;
     this.pix.height = this.gh;
@@ -162,7 +175,7 @@ export class Particles {
     });
   }
 
-  // Pulls sand grains out of the grid and turns them back into flying particles.
+  // Pulls resting grains out of the grid and turns them back into flying ones.
   liftSand(px, py, R, max, velFn) {
     if (!this.sandCount) return;
     const { C, gw, gh, grid } = this;
@@ -187,18 +200,62 @@ export class Particles {
     }
   }
 
+  // ---------- the pieces, as seen by the sand ----------
+
+  // Paints every physics piece into the mask (value = index into maskBodies).
+  buildMask() {
+    const { mask, gw, gh, C } = this;
+    mask.fill(0);
+    const list = this.maskBodies;
+    list.length = 1;
+    for (const b of Composite.allBodies(this.world.engine.world)) {
+      if (b.isSensor || b.label === 'wall' || list.length > 250) continue;
+      const k = list.length;
+      list.push(b);
+      const v = b.vertices;
+      let minY = Infinity, maxY = -Infinity;
+      for (const p of v) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
+      const r0 = Math.max(0, Math.ceil(minY / C - 0.5));
+      const r1 = Math.min(gh - 1, Math.floor(maxY / C - 0.5));
+      for (let r = r0; r <= r1; r++) {
+        const yc = (r + 0.5) * C;
+        let xl = Infinity, xr = -Infinity;
+        for (let i = 0, n = v.length; i < n; i++) {
+          const a = v[i], q = v[(i + 1) % n];
+          if ((a.y <= yc && q.y > yc) || (q.y <= yc && a.y > yc)) {
+            const x = a.x + ((yc - a.y) / (q.y - a.y)) * (q.x - a.x);
+            if (x < xl) xl = x;
+            if (x > xr) xr = x;
+          }
+        }
+        if (xl > xr) continue;
+        const c0 = Math.max(0, Math.ceil(xl / C - 0.5));
+        const c1 = Math.min(gw - 1, Math.floor(xr / C - 0.5));
+        const row = r * gw;
+        for (let c = c0; c <= c1; c++) mask[row + c] = k;
+      }
+    }
+  }
+
+  solidAt(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.gw || cy >= this.gh) return false;
+    const idx = cy * this.gw + cx;
+    return this.grid[idx] !== 0 || this.mask[idx] !== 0;
+  }
+
   // ---------- simulation ----------
 
   step() {
     if (!this.grid) return;
     this.stepCrumble();
     if (!this.n && !this.sandCount) return;
+    this.buildMask();
 
     const world = this.world;
     const g = world.gravity;
     const gx = g.x * G_STEP, gy = g.y * G_STEP;
     const dir = gravityDir(g);
-    const { C, gw, gh, grid, out } = this;
+    const { C, gw, gh, grid, mask, out } = this;
     const W = world.W - 0.01, H = world.H - 0.01;
     const hasFields = world.fields.length > 0;
     const X = this.x, Y = this.y, VX = this.vx, VY = this.vy;
@@ -206,51 +263,76 @@ export class Particles {
     let i = 0;
     while (i < this.n) {
       if (this.delay[i] > 0) { this.delay[i]--; i++; continue; }
+      if (--this.life[i] <= 0) { this.kill(i); continue; }
       let vx = VX[i] + gx, vy = VY[i] + gy;
-      let x = X[i], y = Y[i];
+      const x0 = X[i], y0 = Y[i];
       if (hasFields) {
-        if (world.accelAt(x, y, out)) { this.kill(i); continue; }
+        if (world.accelAt(x0, y0, out)) { this.kill(i); continue; }
         vx += out[0];
         vy += out[1];
       }
       vx *= 0.992;
       vy *= 0.992;
-      x += vx;
-      y += vy;
 
-      if (x < 0) { x = 0; vx = -vx * 0.35; vy *= 0.8; }
-      else if (x > W) { x = W; vx = -vx * 0.35; vy *= 0.8; }
-      if (y < 0) { y = 0; vy = -vy * 0.35; vx *= 0.8; }
-      else if (y > H) { y = H; vy = -vy * 0.35; vx *= 0.8; }
+      // Buried inside a pile or a piece: climb out against gravity.
+      const inside = this.solidAt((x0 / C) | 0, (y0 / C) | 0);
+      if (inside && dir) {
+        X[i] = clampTo(x0 - dir[0] * C, W);
+        Y[i] = clampTo(y0 - dir[1] * C, H);
+        VX[i] = VY[i] = 0;
+        i++;
+        continue;
+      }
 
-      // Settle into the sand grid once it lands on the floor or on other sand.
-      if (dir && vx * vx + vy * vy < 9) {
-        const cx = (x / C) | 0, cy = (y / C) | 0;
+      let x1 = x0 + vx, y1 = y0 + vy;
+      if (x1 < 0) { x1 = 0; vx = -vx * 0.35; vy *= 0.8; }
+      else if (x1 > W) { x1 = W; vx = -vx * 0.35; vy *= 0.8; }
+      if (y1 < 0) { y1 = 0; vy = -vy * 0.35; vx *= 0.8; }
+      else if (y1 > H) { y1 = H; vy = -vy * 0.35; vx *= 0.8; }
+
+      // Walk the path one cell at a time, so fast grains can't tunnel into piles.
+      let hit = false;
+      if (!inside) {
+        const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / C);
+        let px = x0, py = y0;
+        for (let s = 1; s <= n; s++) {
+          const tx = x0 + ((x1 - x0) * s) / n, ty = y0 + ((y1 - y0) * s) / n;
+          if (this.solidAt((tx / C) | 0, (ty / C) | 0)) { hit = true; break; }
+          px = tx; py = ty;
+        }
+        if (hit) { x1 = px; y1 = py; }
+      }
+
+      if (dir) {
+        // Landed on something (sand, a piece, the floor): become a resting grain.
+        const cx = (x1 / C) | 0, cy = (y1 / C) | 0;
         const nx = cx + dir[0], ny = cy + dir[1];
-        const blocked = nx < 0 || ny < 0 || nx >= gw || ny >= gh || grid[ny * gw + nx] !== 0;
-        if (blocked) {
+        const supported = nx < 0 || ny < 0 || nx >= gw || ny >= gh || this.solidAt(nx, ny);
+        if (supported && (hit || vx * vx + vy * vy < 9)) {
           const idx = cy * gw + cx;
-          if (grid[idx] === 0) {
+          if (!grid[idx] && !mask[idx]) {
             grid[idx] = this.col[i];
             this.sandCount++;
             this.kill(i);
             continue;
           }
-          x = Math.min(W, Math.max(0, x - dir[0] * C));
-          y = Math.min(H, Math.max(0, y - dir[1] * C));
-          vx = vy = 0;
         }
+        if (hit) { vx *= 0.2; vy *= 0.2; } // clipped a side: lose speed, then fall
+      } else if (hit) {
+        vx *= -0.3;
+        vy *= -0.3;
       }
 
-      if (--this.life[i] <= 0) { this.kill(i); continue; }
-      X[i] = x; Y[i] = y; VX[i] = vx; VY[i] = vy;
+      X[i] = x1; Y[i] = y1; VX[i] = vx; VY[i] = vy;
       i++;
     }
 
-    // Two passes: one cell per step (180px/s) looked like slow motion.
-    if (dir && this.sandCount) {
+    if (!this.sandCount) return;
+    if (dir) {
       this.stepSand(dir);
       this.stepSand(dir);
+    } else {
+      this.scatterBuried();
     }
   }
 
@@ -267,42 +349,96 @@ export class Particles {
     });
   }
 
-  // One pass of falling sand: each grain drops one cell, or slides diagonally.
+  // One pass over the resting grains. u runs along gravity, v across it.
+  // A grain with nothing under it starts falling; otherwise it tries to slide
+  // diagonally; a grain that a piece moved on top of gets pushed out.
   stepSand(dir) {
-    const { grid, gw, gh } = this;
+    const { grid, mask, gw, gh, C } = this;
+    const vert = dir[1] !== 0;
+    const s = vert ? dir[1] : dir[0];
+    const U = vert ? gh : gw, V = vert ? gw : gh;
+    const su = vert ? gw : 1, sv = vert ? 1 : gw;
     const flip = (this.frame++ & 1) === 1;
-    const rnd = () => (Math.random() < 0.5 ? -1 : 1);
 
-    if (dir[1] !== 0) {
-      const dy = dir[1];
-      for (let y = dy > 0 ? gh - 2 : 1; dy > 0 ? y >= 0 : y < gh; y -= dy) {
-        const row = y * gw, next = (y + dy) * gw;
-        for (let k = 0; k < gw; k++) {
-          const x = flip ? gw - 1 - k : k;
-          const c = grid[row + x];
-          if (!c) continue;
-          if (!grid[next + x]) { grid[next + x] = c; grid[row + x] = 0; continue; }
-          const s = rnd();
-          const a = x + s, b = x - s;
-          if (a >= 0 && a < gw && !grid[next + a]) { grid[next + a] = c; grid[row + x] = 0; }
-          else if (b >= 0 && b < gw && !grid[next + b]) { grid[next + b] = c; grid[row + x] = 0; }
+    for (let k = 0; k < U - 1; k++) {
+      const u = s > 0 ? U - 2 - k : 1 + k;
+      const base = u * su, next = (u + s) * su;
+      for (let m = 0; m < V; m++) {
+        const v = flip ? V - 1 - m : m;
+        const idx = base + v * sv;
+        const c = grid[idx];
+        if (!c) continue;
+        if (mask[idx]) { this.pushOut(idx, c, u, v, s, su, sv, U, vert); continue; }
+
+        const below = next + v * sv;
+        if (!grid[below] && !mask[below]) {
+          const col = vert ? v : u, row = vert ? u : v;
+          if (this.add((col + 0.5) * C, (row + 0.5) * C,
+            vert ? rand(0.15) : s * 0.5, vert ? s * 0.5 : rand(0.15), c) >= 0) {
+            grid[idx] = 0;
+            this.sandCount--;
+          } else {
+            grid[below] = c;
+            grid[idx] = 0;
+          }
+          continue;
+        }
+
+        const r = Math.random() < 0.5 ? -1 : 1;
+        for (let t = 0; t < 2; t++) {
+          const v2 = v + (t ? -r : r);
+          if (v2 < 0 || v2 >= V) continue;
+          const diag = next + v2 * sv, side = base + v2 * sv;
+          if (!grid[diag] && !mask[diag] && !grid[side] && !mask[side]) {
+            grid[diag] = c;
+            grid[idx] = 0;
+            break;
+          }
         }
       }
-    } else {
-      const dx = dir[0];
-      for (let x = dx > 0 ? gw - 2 : 1; dx > 0 ? x >= 0 : x < gw; x -= dx) {
-        for (let k = 0; k < gh; k++) {
-          const y = flip ? gh - 1 - k : k;
-          const idx = y * gw + x;
-          const c = grid[idx];
-          if (!c) continue;
-          if (!grid[idx + dx]) { grid[idx + dx] = c; grid[idx] = 0; continue; }
-          const s = rnd();
-          const a = y + s, b = y - s;
-          if (a >= 0 && a < gh && !grid[a * gw + x + dx]) { grid[a * gw + x + dx] = c; grid[idx] = 0; }
-          else if (b >= 0 && b < gh && !grid[b * gw + x + dx]) { grid[b * gw + x + dx] = c; grid[idx] = 0; }
-        }
+    }
+  }
+
+  // A piece moved onto a resting grain. A fast piece splashes it; a slow one
+  // pushes it up to the first free cell above.
+  pushOut(idx, c, u, v, s, su, sv, U, vert) {
+    const { grid, mask, C } = this;
+    const b = this.maskBodies[mask[idx]];
+    let free = -1, fu = u;
+    for (let t = 1; t <= 80; t++) {
+      const u2 = u - s * t;
+      if (u2 < 0 || u2 >= U) break;
+      const j = u2 * su + v * sv;
+      if (!grid[j] && !mask[j]) { free = j; fu = u2; break; }
+    }
+    const speed = b ? Math.hypot(b.velocity.x, b.velocity.y) : 0;
+    if (speed > 1.5 && free >= 0) {
+      const col = vert ? v : fu, row = vert ? fu : v;
+      const kick = 1 + speed * 0.4;
+      if (this.add((col + 0.5) * C, (row + 0.5) * C,
+        b.velocity.x * 0.5 + rand(1.2) - (vert ? 0 : s * kick),
+        b.velocity.y * 0.5 + rand(1.2) - (vert ? s * kick : 0), c) >= 0) {
+        grid[idx] = 0;
+        this.sandCount--;
+        return;
       }
+    }
+    if (free >= 0) {
+      grid[free] = c;
+      grid[idx] = 0;
+    }
+  }
+
+  // Zero gravity: nothing piles up, but pieces drifting through sand scatter it.
+  scatterBuried() {
+    const { grid, mask, gw, C } = this;
+    for (let idx = 0; idx < grid.length; idx++) {
+      if (!grid[idx] || !mask[idx]) continue;
+      const b = this.maskBodies[mask[idx]];
+      const x = idx % gw, y = (idx / gw) | 0;
+      if (this.add((x + 0.5) * C, (y + 0.5) * C, (b?.velocity.x || 0) + rand(1), (b?.velocity.y || 0) + rand(1), grid[idx]) < 0) return;
+      grid[idx] = 0;
+      this.sandCount--;
     }
   }
 
@@ -311,8 +447,8 @@ export class Particles {
   render() {
     const { ctx, world } = this;
     if (!this.grid) return;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.clearRect(0, 0, world.W, world.H);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     if (this.n || this.sandCount) {
       const { buf, C, gw, gh } = this;
@@ -324,8 +460,9 @@ export class Particles {
       }
       this.pctx.putImageData(this.img, 0, 0);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(this.pix, 0, 0, gw * C, gh * C);
+      ctx.drawImage(this.pix, 0, 0, gw * this.D, gh * this.D);
     }
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     for (const draw of this.overlays) draw(ctx);
   }
 }
@@ -433,3 +570,6 @@ function cssToABGR(hex) {
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
 }
+
+function clampTo(v, max) { return v < 0 ? 0 : v > max ? max : v; }
+function rand(n) { return (Math.random() - 0.5) * 2 * n; }

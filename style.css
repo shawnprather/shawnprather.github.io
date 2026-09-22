@@ -350,11 +350,53 @@ html.broken[data-tool="magnet"] { cursor: crosshair; }
 }
 .phys-hidden { visibility: hidden !important; }
 
+/* Solar system: section names become bright clickable planets, everything else
+   dims into the background. box-shadow fakes padding without changing the size
+   the physics body was measured at. */
 html.orbiting .phys-body[data-section] {
-  z-index: 3; /* planets are the navigation, so nothing may cover them */
+  z-index: 3;
   cursor: pointer;
-  outline: 3px solid var(--accent);
-  outline-offset: 6px;
+  background: var(--accent);
+  color: #111;
+  box-shadow: 0 0 0 8px var(--accent), 0 0 0 11px var(--ink);
+}
+html.orbiting .phys-body[data-section]:hover {
+  box-shadow: 0 0 0 8px var(--accent), 0 0 0 15px var(--ink);
+}
+html.orbiting .phys-body:not([data-section]) { opacity: 0.5; }
+
+.orbit-legend {
+  position: fixed;
+  left: 50%;
+  bottom: var(--s2);
+  transform: translateX(-50%);
+  z-index: 50;
+  width: min(36rem, calc(100vw - var(--s4)));
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--shadow);
+  padding: 12px var(--s2);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  pointer-events: none;
+  animation: fade-in 300ms ease-out;
+}
+@keyframes fade-in { from { opacity: 0; } }
+.orbit-legend strong {
+  display: block;
+  font-family: var(--display);
+  font-weight: 400;
+  text-transform: uppercase;
+}
+.orbit-legend ul { margin: 4px 0 0; padding-left: 1.1em; }
+.orbit-legend kbd {
+  font: 800 0.8125rem/1 var(--body);
+  border: 2px solid var(--ink);
+  padding: 0 4px;
+}
+
+@media (max-width: 40rem) {
+  .orbit-legend { font-size: 0.8125rem; padding: var(--s1) 12px; bottom: var(--s1); }
 }
 
 #fx {
@@ -407,6 +449,10 @@ html.orbiting .phys-body[data-section] {
 .tb-btn:hover { border-color: var(--ink); }
 .tb-btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 .tb-btn kbd { font: inherit; opacity: 0.55; margin-left: 4px; }
+/* Key hints only where there's room; the tooltip always has them. */
+@media (max-width: 90rem) {
+  .tb-btn kbd { display: none; }
+}
 .tb-btn.tb-rebuild { background: var(--accent); color: #111; }
 .tb-sep { width: 3px; align-self: stretch; background: var(--ink); margin: 0 4px; }
 
@@ -422,7 +468,6 @@ html.orbiting .phys-body[data-section] {
   .toolbar { top: var(--s1); }
   .tb-row { gap: 2px; padding: 4px; }
   .tb-btn { font-size: 0.6875rem; padding: 6px 7px; letter-spacing: 0.03em; }
-  .tb-btn kbd { display: none; }
   .tb-sep { display: none; }
   .tb-hint { font-size: 0.8125rem; }
 }

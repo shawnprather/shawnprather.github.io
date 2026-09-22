@@ -10,7 +10,7 @@ const TOOLS = [
   { id: 'magnet', key: '3', label: 'Magnet', hint: 'Hold down to pull everything toward you. It lifts sand too.' },
   { id: 'bomb', key: '4', label: 'Bomb', hint: 'Click anywhere to blow things up.' },
   { id: 'hole', key: '5', label: 'Black hole', hint: 'Click to open a black hole. It eats what it catches for 8 seconds.' },
-  { id: 'planet', key: '6', label: 'Planet', hint: 'Click to place a planet (up to 4). Click a planet to remove it.' },
+  { id: 'planet', key: '6', label: 'Planet', hint: 'Click empty space to drop a planet. Nearby things start orbiting it. Click a planet to remove it.' },
   { id: 'shatter', key: '7', label: 'Shatter', hint: 'Click something to smash it into pieces.' },
   { id: 'sand', key: '8', label: 'Sand', hint: 'Click something to crumble it into sand.' },
 ];
@@ -18,6 +18,7 @@ const GRAVITY = {
   down: [0, 1, 'Gravity ↓'], up: [0, -1, 'Gravity ↑'], zero: [0, 0, 'Gravity off'],
   left: [-1, 0, 'Gravity ←'], right: [1, 0, 'Gravity →'],
 };
+const ORBIT_HINT = 'Solar system: click an orange planet to visit that section, or fling things into new orbits.';
 const MAX_PULL = 170;
 const SLING_POWER = 0.2;
 const MAX_SPEED = 42;
@@ -38,7 +39,11 @@ export class Tools {
     this.buildToolbar();
     world.on('broken', () => this.show());
     world.on('rebuild-start', () => this.hide());
-    world.on('orbit-off', () => this.orbitBtn.setAttribute('aria-pressed', 'false'));
+    world.on('orbit-off', () => {
+      this.orbitBtn.setAttribute('aria-pressed', 'false');
+      if (this.toolBeforeOrbit) this.setTool(this.toolBeforeOrbit);
+      this.toolBeforeOrbit = null;
+    });
     world.onStep(() => this.step());
     particles.overlays.push((ctx) => this.draw(ctx));
 
@@ -75,18 +80,19 @@ export class Tools {
 
     this.toolBtns = {};
     for (const t of TOOLS) {
-      const b = button(`${t.label} <kbd>${t.key}</kbd>`, () => this.setTool(t.id), t.hint);
+      const b = button(`${t.label} <kbd>${t.key}</kbd>`, () => this.setTool(t.id), `${t.hint} (key ${t.key})`);
       b.setAttribute('aria-pressed', 'false');
       this.toolBtns[t.id] = b;
     }
     const sep = document.createElement('span');
     sep.className = 'tb-sep';
     row.append(sep);
-    this.gravBtn = button('', () => this.cycleGravity(), 'Cycle gravity: down, up, off. Arrow keys point it any way.');
-    this.orbitBtn = button('Orbit <kbd>O</kbd>', () => this.toggleOrbit(), 'Solar system mode. Click a section heading to go there.');
+    this.gravBtn = button('', () => this.cycleGravity(), 'Cycle gravity: down, up, off (key G). Arrow keys point it any way.');
+    this.orbitBtn = button('Solar system <kbd>O</kbd>', () => this.toggleOrbit(),
+      'Everything orbits a sun. The section names become planets you can click to visit. (key O)');
     this.orbitBtn.setAttribute('aria-pressed', 'false');
     row.append(this.game.trophyButton());
-    const rebuild = button('Rebuild <kbd>Esc</kbd>', () => this.world.rebuild(), 'Put the page back together');
+    const rebuild = button('Rebuild <kbd>Esc</kbd>', () => this.world.rebuild(), 'Put the page back together (key Esc)');
     rebuild.classList.add('tb-rebuild');
 
     this.hint = document.createElement('p');
@@ -128,14 +134,20 @@ export class Tools {
     this.tool = id;
     document.documentElement.dataset.tool = id;
     for (const [tid, b] of Object.entries(this.toolBtns)) b.setAttribute('aria-pressed', String(tid === id));
-    this.hint.textContent = TOOLS.find((t) => t.id === id).hint;
+    const hint = TOOLS.find((t) => t.id === id).hint;
+    if (this.orbits.active) this.say(hint);
+    else this.hint.textContent = hint;
+  }
+
+  baseHint() {
+    return this.orbits.active ? ORBIT_HINT : TOOLS.find((t) => t.id === this.tool).hint;
   }
 
   say(msg) {
     this.hint.textContent = msg;
     clearTimeout(this.sayTimer);
     this.sayTimer = setTimeout(() => {
-      if (this.world.state === 'broken') this.hint.textContent = TOOLS.find((t) => t.id === this.tool).hint;
+      if (this.world.state === 'broken') this.hint.textContent = this.baseHint();
     }, 3000);
   }
 
@@ -175,9 +187,13 @@ export class Tools {
     this.cancelSling();
     this.setGravity('zero', true);
     this.gravBtn.innerHTML = 'Gravity off <kbd>G</kbd>';
+    // Clicking planets only works with Grab, so switch to it for the tour.
+    this.toolBeforeOrbit = this.tool;
     this.orbits.enter();
+    this.setTool('grab');
     this.orbitBtn.setAttribute('aria-pressed', 'true');
-    this.say('Orbit mode. Click a section heading to fly there. Throw things to change their orbits.');
+    clearTimeout(this.sayTimer);
+    this.hint.textContent = ORBIT_HINT;
   }
 
   // ---------- input ----------
