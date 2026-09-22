@@ -1,0 +1,34 @@
+/* A deliberately small starting point.
+   It exists to prove one thing: this file is loading.
+   If you can see spacing and a readable line length, the path in index.html works.
+
+   Delete all of it whenever you want. */
+
+:root {
+  /* Makes the page follow the reader's light or dark mode setting, for free. */
+  color-scheme: light dark;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* 65ch caps the line at about 65 characters. Long lines are genuinely hard
+     to read, and this single rule does more for legibility than anything else
+     in this file. */
+  max-width: 65ch;
+
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+  line-height: 1.6;
+  font-size: 1.125rem;
+}
+
+h1 {
+  font-size: 3rem;
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+}
+
+p {
+  margin-bottom: 1.5rem;
+}
