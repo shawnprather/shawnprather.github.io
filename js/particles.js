@@ -45,7 +45,7 @@ export class Particles {
     this.crumbling = [];
     this.overlays = [];
     this.maskBodies = [];
-    this.out = [0, 0];
+    this.out = [0, 0, 0];
     this.waterTotal = 0;
     this.selfGravity = null; // set by sand planets mode
     this.hidePixels = false; // set by ASCII mode, which draws the sand itself
@@ -124,6 +124,16 @@ export class Particles {
     const { x: bx, y: by } = body.position;
     const { x: bvx, y: bvy } = body.velocity;
 
+    // Grains the same colour as the page background (card paper, row fills) would
+    // be invisible, so they become sand-coloured instead.
+    const [br, bg, bb] = hexRGB(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+    const light = br + bg + bb > 382;
+    const tans = (light ? ['#DCCFB6', '#D2C3A6', '#E4D9C3'] : ['#6B5E48', '#5E5240', '#7A6C53']).map(cssToABGR);
+    const bgLike = (px) => {
+      const r = px & 255, g = (px >> 8) & 255, b = (px >> 16) & 255;
+      return Math.abs(r - br) + Math.abs(g - bg) + Math.abs(b - bb) < 40;
+    };
+
     // One sample per grid cell on screen; thin it out if we're near the budget.
     let step = Math.max(1, this.C / s);
     let count = 0;
@@ -140,7 +150,7 @@ export class Particles {
         const ox = (lx - w / 2) * s, oy = (ly - h / 2) * s;
         const wx = bx + ox * cos - oy * sin;
         const wy = by + ox * sin + oy * cos;
-        const col = (px | 0xff000000) >>> 0;
+        const col = bgLike(px) ? tans[(Math.random() * 3) | 0] : (px | 0xff000000) >>> 0;
         if (mode === 'shatter') {
           const dx = wx - origin.x, dy = wy - origin.y;
           const d = Math.hypot(dx, dy) || 1;
@@ -262,14 +272,16 @@ export class Particles {
   // The closest open cell to (cx, cy), never further along gravity, preferring up.
   // Keeps displaced sand next to the piece that moved it instead of teleporting it
   // to the far side. Falls back to a straight search against gravity.
+  // With no gravity (dir null) it looks in every direction, nearby only.
   findFree(cx, cy, dir) {
     const { grid, mask, gw, gh } = this;
-    const key = dir.join();
+    const d0 = dir || [0, 0];
+    const key = d0.join();
     if (this.offsets?.key !== key) {
       const list = [];
       for (let oy = -4; oy <= 4; oy++) {
         for (let ox = -4; ox <= 4; ox++) {
-          const along = ox * dir[0] + oy * dir[1];
+          const along = ox * d0[0] + oy * d0[1];
           const d = Math.hypot(ox, oy);
           if ((ox || oy) && along <= 0 && d <= 4.5) list.push([ox, oy, d + along * 0.01]);
         }
@@ -277,12 +289,15 @@ export class Particles {
       list.sort((a, b) => a[2] - b[2]);
       this.offsets = { key, list };
     }
-    for (const [ox, oy] of this.offsets.list) {
+    const s = dir ? 0 : (Math.random() * 8) | 0; // no gravity: no preferred side either
+    for (const o of this.offsets.list) {
+      const [ox, oy] = turn(o[0], o[1], s);
       const x = cx + ox, y = cy + oy;
       if (x < 0 || y < 0 || x >= gw || y >= gh) continue;
       const j = y * gw + x;
       if (!grid[j] && !mask[j]) return j;
     }
+    if (!dir) return -1;
     for (let t = 5; t <= 80; t++) {
       const x = cx - dir[0] * t, y = cy - dir[1] * t;
       if (x < 0 || y < 0 || x >= gw || y >= gh) break;
@@ -331,8 +346,11 @@ export class Particles {
       }
       if (sg) {
         sg.sample(x0, y0, out);
-        vx += out[0];
-        vy += out[1];
+        const keep = 1 - out[2];
+        vx = (vx + out[0]) * keep;
+        vy = (vy + out[1]) * keep;
+        const sp = vx * vx + vy * vy;
+        if (sp > 16) { const k = 4 / Math.sqrt(sp); vx *= k; vy *= k; }
       }
       vx *= 0.992;
       vy *= 0.992;
@@ -349,6 +367,26 @@ export class Particles {
           this.sandCount++;
         }
         this.kill(i);
+        continue;
+      }
+      // No gravity: a piece drifting through dust shoves it aside and carries it
+      // along, instead of the dust sitting on top of the piece hiding its text.
+      if (inside) {
+        const cx0 = (x0 / C) | 0, cy0 = (y0 / C) | 0;
+        const b = this.maskBodies[mask[cy0 * gw + cx0]];
+        const j = this.findFree(cx0, cy0, null);
+        if (j >= 0) {
+          X[i] = ((j % gw) + 0.5) * C;
+          Y[i] = (((j / gw) | 0) + 0.5) * C;
+        } else if (b) {
+          const dx = x0 - b.position.x, dy = y0 - b.position.y;
+          const d = Math.hypot(dx, dy) || 1;
+          X[i] = x0 + (dx / d) * C * 2;
+          Y[i] = y0 + (dy / d) * C * 2;
+        }
+        VX[i] = b ? b.velocity.x : vx * 0.3;
+        VY[i] = b ? b.velocity.y : vy * 0.3;
+        i++;
         continue;
       }
 
@@ -400,6 +438,7 @@ export class Particles {
       i++;
     }
 
+    if (sg) this.pack();
     if (!this.sandCount) return;
     if (dir) {
       // Mark cells that flying grains are in. The resting sand treats them as
@@ -410,6 +449,37 @@ export class Particles {
       this.stepSand(dir);
     } else {
       this.scatterBuried();
+    }
+  }
+
+  // Sand planets: one grain per cell. A grain that ends up sharing a cell moves
+  // to the nearest open one, so a clump builds into a solid disc instead of
+  // collapsing into a single dot.
+  pack() {
+    const { occ, grid, mask, C, gw, gh, x: X, y: Y, vx: VX, vy: VY } = this;
+    occ.fill(0);
+    if (this.offsets?.key !== '0,0') this.findFree(0, 0, null); // builds the all-directions offsets
+    const offs = this.offsets.list;
+    for (let i = 0; i < this.n; i++) {
+      if (this.delay[i]) continue;
+      const cx = Math.min(gw - 1, Math.max(0, (X[i] / C) | 0));
+      const cy = Math.min(gh - 1, Math.max(0, (Y[i] / C) | 0));
+      const j = cy * gw + cx;
+      if (!occ[j] && !grid[j] && !mask[j]) { occ[j] = 1; continue; }
+      const s = (Math.random() * 8) | 0; // random mirror/turn, so pushes don't all favour one side
+      for (const o of offs) {
+        const [ox, oy] = turn(o[0], o[1], s);
+        const x = cx + ox, y = cy + oy;
+        if (x < 0 || y < 0 || x >= gw || y >= gh) continue;
+        const k = y * gw + x;
+        if (occ[k] || grid[k] || mask[k]) continue;
+        occ[k] = 1;
+        X[i] = (x + 0.5) * C;
+        Y[i] = (y + 0.5) * C;
+        VX[i] *= 0.5;
+        VY[i] *= 0.5;
+        break;
+      }
     }
   }
 
@@ -706,3 +776,15 @@ function cssToABGR(hex) {
 }
 
 function rand(n) { return (Math.random() - 0.5) * 2 * n; }
+
+function hexRGB(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// One of the 8 mirror/quarter-turn versions of an offset (s = 0 leaves it alone).
+function turn(x, y, s) {
+  if (s & 1) x = -x;
+  if (s & 2) y = -y;
+  return s & 4 ? [y, x] : [x, y];
+}

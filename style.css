@@ -849,25 +849,11 @@ html.ascii .fx-el { opacity: 0 !important; }
 }
 .panel-browser { margin: 4px 0 var(--s1); }
 
-/* Opens the in-page browser once it's unlocked. Hidden while the page is broken,
-   where the Trophies panel has the same button. */
-.browser-launch {
-  position: fixed;
-  right: var(--s2);
-  bottom: var(--s2);
-  z-index: 40;
-  font: 800 0.8125rem/1 var(--body);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border: 3px solid var(--ink);
-  background: var(--paper);
-  color: var(--ink);
-  box-shadow: 4px 4px 0 var(--shadow);
-  padding: 10px 14px;
-  cursor: pointer;
-}
-.browser-launch:hover { background: var(--accent); color: #111; }
-html.broken .browser-launch { display: none; }
+/* The green light is the hidden way one level deeper. */
+.bw-deeper { cursor: pointer; }
+.bw-deeper:hover { filter: brightness(1.2); }
+.browser-win.shake { animation: shake 360ms; }
+@keyframes shake { 20%, 60% { translate: -6px 0; } 40%, 80% { translate: 6px 0; } }
 .browser-win.nested {
   left: 6px;
   top: 6px;

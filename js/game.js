@@ -34,8 +34,8 @@ const ACHIEVEMENTS = [
   ['ascii', 'Plain text', 'Turned the page into ASCII.'],
   ['browser', 'Browserception', `Earned ${BROWSER_AT} trophies and got a web browser inside the web browser.`],
   ['nested', 'Site-ception', 'Loaded this site inside its own browser.'],
-  ['stacked', 'Browser in a browser', 'Opened the browser from inside the browser.'],
-  ['turtles', 'Turtles all the way down', 'Stacked browsers 5 levels deep.'],
+  ['stacked', 'Browser in a browser', 'Found the way down: a browser inside the browser.'],
+  ['turtles', 'Turtles all the way down', 'Went 5 browsers deep.'],
   ['tttfound', 'Hidden game', 'Found the hidden game. (A certain dot is worth three clicks.)'],
   ['tttwin', 'Three in a row', 'Beat the bot at tic-tac-toe.'],
   ['tttdraw', "Cat's game", 'Tied the bot at tic-tac-toe.'],
@@ -106,15 +106,11 @@ export class Game {
       this.renderPanel();
     });
 
-    // Once the browser is unlocked, a button opens it from the normal page. Inside
-    // a browser, the same button opens the next one down.
-    this.launcher = document.createElement('button');
-    this.launcher.type = 'button';
-    this.launcher.className = 'browser-launch';
-    this.launcher.textContent = DEPTH ? `Open a browser, level ${DEPTH + 1}` : 'Open the browser';
-    this.launcher.addEventListener('click', () => this.openBrowser());
-    document.body.append(this.launcher);
-    this.renderPanel();
+    // The way down is hidden: the browser window around this page (if there is
+    // one) sends a message when its green light is clicked.
+    addEventListener('message', (e) => {
+      if (e.origin === location.origin && e.source === window.parent && e.data?.sp === 'go-deeper') this.openBrowser();
+    });
     world.on('planet', (n) => { if (n >= 3) this.unlock('threebody'); });
     world.on('rebuild-start', () => { this.removeHoop(); this.panel.hidden = true; });
     world.on('rebuilt', () => this.unlock('undo'));
@@ -135,7 +131,7 @@ export class Game {
     this.toast(`Achievement: ${a.title}`, a.desc);
     this.renderPanel();
     if (id === 'browser') {
-      this.toast('You unlocked a web browser', 'Reopen it from the Trophies panel. The site inside has its own browser too.');
+      this.toast('You unlocked a web browser', 'Reopen it from the Trophies panel. Is there a way to go deeper?');
       this.openBrowser();
     }
     const earned = [...this.unlocked].filter((x) => x !== 'browser').length;
@@ -196,9 +192,9 @@ export class Game {
 
   renderPanel() {
     if (this.trophyBtn) this.trophyBtn.textContent = `Trophies ${this.unlocked.size}/${ACHIEVEMENTS.length}`;
-    if (this.launcher) this.launcher.hidden = !this.unlocked.has('browser');
     if (!this.list) return;
-    this.browserBtn.hidden = !this.unlocked.has('browser');
+    // Reopening the browser is a reward in the real tab; inside one, the way down must be found.
+    this.browserBtn.hidden = !this.unlocked.has('browser') || DEPTH > 0;
     this.list.replaceChildren(...ACHIEVEMENTS.map((a) => {
       const li = document.createElement('li');
       const got = this.unlocked.has(a.id);
