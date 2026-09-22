@@ -142,8 +142,10 @@ a:hover { color: var(--accent-ink); }
   cursor: pointer;
   transition: transform 80ms, box-shadow 80ms;
 }
-.break-btn:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--ink); }
-.break-btn:active { transform: translate(4px, 4px); box-shadow: 2px 2px 0 var(--ink); }
+.break-btn span { display: block; }
+.break-btn:not(.phys-body):hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 var(--ink); }
+.break-btn:not(.phys-body):active { transform: translate(4px, 4px); box-shadow: 2px 2px 0 var(--ink); }
+.break-btn.phys-body { transition: none; }
 
 .break-hint {
   font-weight: 600;
@@ -349,6 +351,7 @@ html.broken[data-tool="magnet"] { cursor: crosshair; }
 .phys-hidden { visibility: hidden !important; }
 
 html.orbiting .phys-body[data-section] {
+  z-index: 3; /* planets are the navigation, so nothing may cover them */
   cursor: pointer;
   outline: 3px solid var(--accent);
   outline-offset: 6px;
@@ -416,8 +419,12 @@ html.orbiting .phys-body[data-section] {
 }
 
 @media (max-width: 40rem) {
+  .toolbar { top: var(--s1); }
+  .tb-row { gap: 2px; padding: 4px; }
+  .tb-btn { font-size: 0.6875rem; padding: 6px 7px; letter-spacing: 0.03em; }
   .tb-btn kbd { display: none; }
   .tb-sep { display: none; }
+  .tb-hint { font-size: 0.8125rem; }
 }
 
 /* ---------- Achievements ---------- */
