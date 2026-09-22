@@ -125,10 +125,10 @@ export class Particles {
     const { x: bvx, y: bvy } = body.velocity;
 
     // Grains the same colour as the page background (card paper, row fills) would
-    // be invisible, so they become sand-coloured instead.
+    // be invisible, so they become a light grey instead (darker grey in dark mode).
     const [br, bg, bb] = hexRGB(getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
     const light = br + bg + bb > 382;
-    const tans = (light ? ['#DCCFB6', '#D2C3A6', '#E4D9C3'] : ['#6B5E48', '#5E5240', '#7A6C53']).map(cssToABGR);
+    const greys = (light ? ['#C8C8C8', '#BDBDBD', '#D2D2D2'] : ['#4E4E4E', '#444444', '#585858']).map(cssToABGR);
     const bgLike = (px) => {
       const r = px & 255, g = (px >> 8) & 255, b = (px >> 16) & 255;
       return Math.abs(r - br) + Math.abs(g - bg) + Math.abs(b - bb) < 40;
@@ -150,7 +150,7 @@ export class Particles {
         const ox = (lx - w / 2) * s, oy = (ly - h / 2) * s;
         const wx = bx + ox * cos - oy * sin;
         const wy = by + ox * sin + oy * cos;
-        const col = bgLike(px) ? tans[(Math.random() * 3) | 0] : (px | 0xff000000) >>> 0;
+        const col = bgLike(px) ? greys[(Math.random() * 3) | 0] : (px | 0xff000000) >>> 0;
         if (mode === 'shatter') {
           const dx = wx - origin.x, dy = wy - origin.y;
           const d = Math.hypot(dx, dy) || 1;
