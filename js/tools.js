@@ -112,8 +112,18 @@ export class Tools {
     this.asciiBtn = button(modes, 'ASCII <kbd>A</kbd>', () => this.toggleAscii(), 'Redraw everything as text characters (key A)');
     this.asciiBtn.setAttribute('aria-pressed', 'false');
     modes.append(this.game.trophyButton());
+    this.menusBtn = button(modes, 'Hide menus <kbd>H</kbd>', () => this.toggleMenus(true), 'Hide the toolbar and instructions for a clean view (key H)');
     const rebuild = button(modes, 'Rebuild <kbd>Esc</kbd>', () => this.world.rebuild(), 'Put the page back together (key Esc)');
     rebuild.classList.add('tb-rebuild');
+
+    // While the menus are hidden, this is the one thing left on screen.
+    this.showBtn = document.createElement('button');
+    this.showBtn.type = 'button';
+    this.showBtn.className = 'show-menus';
+    this.showBtn.textContent = 'Show menus';
+    this.showBtn.title = 'Bring the toolbar back (key H)';
+    this.showBtn.addEventListener('click', () => this.toggleMenus(false));
+    document.body.append(this.showBtn);
 
     this.hint = document.createElement('p');
     this.hint.className = 'tb-hint';
@@ -148,7 +158,7 @@ export class Tools {
     this.bar.hidden = true;
     this.gravityMode = 'down';
     this.asciiBtn.setAttribute('aria-pressed', 'false');
-    document.documentElement.classList.remove('dragging');
+    document.documentElement.classList.remove('dragging', 'menus-hidden');
     document.documentElement.removeAttribute('data-tool');
   }
 
@@ -244,6 +254,11 @@ export class Tools {
     this.world.emit('mode-off', id);
   }
 
+  toggleMenus(hide = !document.documentElement.classList.contains('menus-hidden')) {
+    document.documentElement.classList.toggle('menus-hidden', hide);
+    (hide ? this.showBtn : this.menusBtn).focus({ preventScroll: true });
+  }
+
   toggleAscii() {
     const on = !this.ascii.on;
     this.ascii.set(on);
@@ -255,7 +270,7 @@ export class Tools {
   onDown(e) {
     const w = this.world;
     if (w.state !== 'broken' || e.button !== 0) return;
-    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt')) return;
+    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt, .show-menus')) return;
     if (this.down) {
       // A second finger is ignored; a mouse that was released outside the window is reset.
       if (e.pointerType !== 'mouse') return;
@@ -308,7 +323,7 @@ export class Tools {
   onClick(e) {
     const w = this.world;
     if (w.state === 'normal') return;
-    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt')) return;
+    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt, .show-menus')) return;
     if (w.state === 'rebuilding') { e.preventDefault(); e.stopPropagation(); return; }
     const keyboard = e.detail === 0;
     if (!keyboard && (this.dragged || this.mode === 'golf' || !['grab', 'sling'].includes(this.tool))) {
@@ -354,6 +369,7 @@ export class Tools {
     else if (k === 'Escape' || k === 'r') w.rebuild();
     else if (k === 'g') this.cycleGravity();
     else if (k === 'a') this.toggleAscii();
+    else if (k === 'h') this.toggleMenus();
     else if (arrows[k]) this.setGravity(arrows[k]);
     else return;
     e.preventDefault();

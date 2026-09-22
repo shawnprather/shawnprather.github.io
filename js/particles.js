@@ -348,8 +348,17 @@ export class Particles {
         // No air in space: momentum is kept. Inside a clump, friction between
         // neighbours pulls a grain toward the clump's own velocity instead.
         sg.sample(x0, y0, out);
-        vx += out[0] + (out[3] - vx) * out[2];
-        vy += out[1] + (out[4] - vy) * out[2];
+        // Past a cruising speed the swirl can't speed a grain up any more (it can
+        // still steer and slow it), so orbits settle instead of winding up forever.
+        // Flung grains keep whatever speed they were given.
+        let ax = out[0], ay = out[1];
+        const v2 = vx * vx + vy * vy;
+        if (v2 > 6.25) {
+          const along = (ax * vx + ay * vy) / v2;
+          if (along > 0) { ax -= along * vx; ay -= along * vy; }
+        }
+        vx += ax + (out[3] - vx) * out[2];
+        vy += ay + (out[4] - vy) * out[2];
         const sp = vx * vx + vy * vy;
         if (sp > 144) { const k = 12 / Math.sqrt(sp); vx *= k; vy *= k; }
       } else {
@@ -393,10 +402,12 @@ export class Particles {
       }
 
       let x1 = x0 + vx, y1 = y0 + vy;
-      if (x1 < 0) { x1 = 0; vx = -vx * 0.35; vy *= 0.8; }
-      else if (x1 > W) { x1 = W; vx = -vx * 0.35; vy *= 0.8; }
-      if (y1 < 0) { y1 = 0; vy = -vy * 0.35; vx *= 0.8; }
-      else if (y1 > H) { y1 = H; vy = -vy * 0.35; vx *= 0.8; }
+      // Screen edges. In sand planets they're nearly elastic, so motion isn't lost there.
+      const bounce = sg ? 0.85 : 0.35, slide = sg ? 0.98 : 0.8;
+      if (x1 < 0) { x1 = 0; vx = -vx * bounce; vy *= slide; }
+      else if (x1 > W) { x1 = W; vx = -vx * bounce; vy *= slide; }
+      if (y1 < 0) { y1 = 0; vy = -vy * bounce; vx *= slide; }
+      else if (y1 > H) { y1 = H; vy = -vy * bounce; vx *= slide; }
 
       // Walk the path one cell at a time, so fast grains can't tunnel into piles.
       // hit: 0 = clear, 1 = sand or a piece, 2 = another flying grain (sand planets).
