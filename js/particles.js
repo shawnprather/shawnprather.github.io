@@ -45,7 +45,7 @@ export class Particles {
     this.crumbling = [];
     this.overlays = [];
     this.maskBodies = [];
-    this.out = [0, 0, 0];
+    this.out = [0, 0, 0, 0, 0];
     this.waterTotal = 0;
     this.selfGravity = null; // set by sand planets mode
     this.hidePixels = false; // set by ASCII mode, which draws the sand itself
@@ -345,15 +345,17 @@ export class Particles {
         vy += out[1];
       }
       if (sg) {
+        // No air in space: momentum is kept. Inside a clump, friction between
+        // neighbours pulls a grain toward the clump's own velocity instead.
         sg.sample(x0, y0, out);
-        const keep = 1 - out[2];
-        vx = (vx + out[0]) * keep;
-        vy = (vy + out[1]) * keep;
+        vx += out[0] + (out[3] - vx) * out[2];
+        vy += out[1] + (out[4] - vy) * out[2];
         const sp = vx * vx + vy * vy;
-        if (sp > 16) { const k = 4 / Math.sqrt(sp); vx *= k; vy *= k; }
+        if (sp > 144) { const k = 12 / Math.sqrt(sp); vx *= k; vy *= k; }
+      } else {
+        vx *= 0.992;
+        vy *= 0.992;
       }
-      vx *= 0.992;
-      vy *= 0.992;
 
       // Buried inside a pile or a piece (two grains landed in the same cell, or a
       // piece moved over it): settle it into the nearest open cell right away.
@@ -397,7 +399,8 @@ export class Particles {
       else if (y1 > H) { y1 = H; vy = -vy * 0.35; vx *= 0.8; }
 
       // Walk the path one cell at a time, so fast grains can't tunnel into piles.
-      let hit = false;
+      // hit: 0 = clear, 1 = sand or a piece, 2 = another flying grain (sand planets).
+      let hit = 0;
       if (!inside) {
         const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / C);
         const start = ((y0 / C) | 0) * gw + ((x0 / C) | 0);
@@ -405,7 +408,8 @@ export class Particles {
         for (let s = 1; s <= n; s++) {
           const tx = x0 + ((x1 - x0) * s) / n, ty = y0 + ((y1 - y0) * s) / n;
           const tcx = (tx / C) | 0, tcy = (ty / C) | 0;
-          if (this.solidAt(tcx, tcy) || (sg && tcy * gw + tcx !== start && occ[tcy * gw + tcx])) { hit = true; break; }
+          if (this.solidAt(tcx, tcy)) { hit = 1; break; }
+          if (sg && tcy * gw + tcx !== start && occ[tcy * gw + tcx]) { hit = 2; break; }
           px = tx; py = ty;
         }
         if (hit) { x1 = px; y1 = py; }
@@ -426,9 +430,11 @@ export class Particles {
           }
         }
         if (hit) { vx *= 0.2; vy *= 0.2; } // clipped a side: lose speed, then fall
-      } else if (hit && sg) {
-        vx *= 0.15; // grains in a clump stick together
-        vy *= 0.15;
+      } else if (hit === 2) {
+        // Grain on grain: an inelastic bump that keeps the clump's momentum
+        // (only the speed relative to the neighbours is lost).
+        vx = out[3] + (vx - out[3]) * 0.3;
+        vy = out[4] + (vy - out[4]) * 0.3;
       } else if (hit) {
         vx *= -0.3;
         vy *= -0.3;
@@ -456,7 +462,8 @@ export class Particles {
   // to the nearest open one, so a clump builds into a solid disc instead of
   // collapsing into a single dot.
   pack() {
-    const { occ, grid, mask, C, gw, gh, x: X, y: Y, vx: VX, vy: VY } = this;
+    const { occ, grid, mask, C, gw, gh, x: X, y: Y, vx: VX, vy: VY, out } = this;
+    const sg = this.selfGravity;
     occ.fill(0);
     if (this.offsets?.key !== '0,0') this.findFree(0, 0, null); // builds the all-directions offsets
     const offs = this.offsets.list;
@@ -476,8 +483,10 @@ export class Particles {
         occ[k] = 1;
         X[i] = (x + 0.5) * C;
         Y[i] = (y + 0.5) * C;
-        VX[i] *= 0.5;
-        VY[i] *= 0.5;
+        // Being squeezed out costs speed relative to the clump, not the clump's own.
+        sg.sample(X[i], Y[i], out);
+        VX[i] = out[3] + (VX[i] - out[3]) * 0.5;
+        VY[i] = out[4] + (VY[i] - out[4]) * 0.5;
         break;
       }
     }

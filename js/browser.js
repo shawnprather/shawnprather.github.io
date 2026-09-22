@@ -40,7 +40,7 @@ export function openBrowser() {
   win.innerHTML = `
     <div class="bw-title">
       <button type="button" class="bw-close" aria-label="Close browser"></button>
-      <span class="bw-dot"></span><button type="button" class="bw-dot bw-deeper" aria-label="Go one level deeper"></button>
+      <span class="bw-dot"></span><span class="bw-dot"></span>
       <span class="bw-name">${DEPTH ? `Browser, ${DEPTH + 1} levels deep` : 'Browser (inside your browser)'}</span>
     </div>
     <form class="bw-bar">
@@ -87,17 +87,6 @@ export function openBrowser() {
   win.querySelector('[data-go=fwd]').addEventListener('click', () => { if (at < history.length - 1) show(history[++at]); });
   win.querySelector('[data-go=reload]').addEventListener('click', () => { frame.src = frame.src; });
   win.querySelector('.bw-close').addEventListener('click', () => { win.hidden = true; });
-  // The secret way down: the green light asks the copy of the site inside this
-  // window to open its own browser. Other sites can't be asked, so it just shakes.
-  win.querySelector('.bw-deeper').addEventListener('click', () => {
-    if (frame.src.startsWith(BASE)) {
-      frame.contentWindow.postMessage({ sp: 'go-deeper' }, location.origin);
-    } else {
-      win.classList.remove('shake');
-      void win.offsetWidth;
-      win.classList.add('shake');
-    }
-  });
   win.addEventListener('keydown', (e) => {
     e.stopPropagation(); // typing an address must not trigger the toolbar's shortcuts
     if (e.key === 'Escape') win.hidden = true;
