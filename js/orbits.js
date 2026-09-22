@@ -3,6 +3,7 @@
 // Also home of the trajectory predictor the slingshot uses.
 
 import { G_STEP, clamp } from './world.js';
+import { showLegend } from './ui.js';
 
 const { Bodies, Body, Composite } = window.Matter;
 const SETUP_STEPS = 54;
@@ -91,17 +92,11 @@ export class Orbits {
 
   // Orbit mode is not obvious, so it explains itself for as long as it is on.
   showLegend() {
-    const el = document.createElement('div');
-    el.className = 'orbit-legend';
-    el.innerHTML = `
-      <strong>Solar system</strong>
-      <ul>
-        <li>The orange labels (About, Projects, Experience, Contact) are planets. Click one to fly to that section.</li>
-        <li>Drag and fling anything to knock it into a new orbit.</li>
-        <li>Press <kbd>O</kbd> or the Solar system button again to turn gravity back on.</li>
-      </ul>`;
-    document.body.append(el);
-    this.legend = el;
+    this.legend = showLegend('Solar system', [
+      'The orange labels (About, Projects, Experience, Contact) are planets. Click one to fly to that section.',
+      'Drag and fling anything to knock it into a new orbit.',
+      'Press <kbd>O</kbd> or the Solar system button again to turn gravity back on.',
+    ]);
   }
 
   placeSun() {

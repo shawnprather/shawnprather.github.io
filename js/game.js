@@ -2,9 +2,11 @@
 // and achievements that pop up as you break things.
 
 import { clamp } from './world.js';
+import { openBrowser } from './browser.js';
 
 const { Bodies, Composite, Events } = window.Matter;
 const STORE_KEY = 'sp-achievements';
+const BROWSER_AT = 10; // trophies needed to unlock the browser
 
 const ACHIEVEMENTS = [
   ['broke', 'Broke the internet', 'Pressed the button you were told not to press.'],
@@ -21,6 +23,20 @@ const ACHIEVEMENTS = [
   ['net', 'Nothing but net', 'Swished a letter through the hoop.'],
   ['bunny', 'Bunny mode', 'Swished every letter of SHAWN and found the secret.'],
   ['undo', 'Undo button', 'Put the whole page back together.'],
+  ['stardust', 'Stardust', 'Turned on sand planets.'],
+  ['planetborn', 'A planet is born', 'Let enough dust clump together to form a planet.'],
+  ['tap', 'Open the tap', 'Placed a water valve.'],
+  ['flood', 'Flood warning', 'Let a lot of water out.'],
+  ['floats', 'It floats!', 'Got a piece to float in water.'],
+  ['fore', 'Fore!', 'Took your first putt.'],
+  ['ace', 'Hole in one', 'Sank a putt in one stroke.'],
+  ['underpar', 'Under par', 'Finished a hole under par.'],
+  ['ascii', 'Plain text', 'Turned the page into ASCII.'],
+  ['browser', 'Browserception', `Earned ${BROWSER_AT} trophies and got a web browser inside the web browser.`],
+  ['nested', 'Browsers all the way down', 'Opened this site inside its own browser.'],
+  ['tttfound', 'Hidden game', 'Found the hidden game. (A certain dot is worth three clicks.)'],
+  ['tttwin', 'Three in a row', 'Beat the bot at tic-tac-toe.'],
+  ['tttdraw', "Cat's game", 'Tied the bot at tic-tac-toe.'],
 ].map(([id, title, desc]) => ({ id, title, desc }));
 
 export class Game {
@@ -51,9 +67,28 @@ export class Game {
     count('shatter', 1, 'shattered');
     count('sandify', 5, 'sand');
     count('sling', 3, 'angry');
-    world.on('orbit-on', () => { this.unlock('solar'); this.removeHoop(); });
-    world.on('orbit-off', () => { if (world.state === 'broken') this.buildHoop(); });
+    world.on('orbit-on', () => this.unlock('solar'));
+    // The hoop gets in the way of every mode, so it steps out while one is on.
+    world.on('mode', (id) => {
+      this.removeHoop();
+      if (id === 'accretion') this.unlock('stardust');
+    });
+    world.on('mode-off', () => { if (world.state === 'broken') this.buildHoop(); });
     world.on('stable-orbit', () => this.unlock('stable'));
+    world.on('planet-formed', () => this.unlock('planetborn'));
+    world.on('valve', () => this.unlock('tap'));
+    world.on('flood', () => this.unlock('flood'));
+    world.on('float', () => this.unlock('floats'));
+    world.on('putt', () => this.unlock('fore'));
+    world.on('hole-done', ({ strokes, par }) => {
+      if (strokes === 1) this.unlock('ace');
+      if (strokes < par) this.unlock('underpar');
+    });
+    world.on('ascii', () => this.unlock('ascii'));
+    world.on('ttt-found', () => this.unlock('tttfound'));
+    world.on('ttt-win', () => this.unlock('tttwin'));
+    world.on('ttt-draw', () => this.unlock('tttdraw'));
+    if (window.self !== window.top) this.unlock('nested');
     world.on('planet', (n) => { if (n >= 3) this.unlock('threebody'); });
     world.on('rebuild-start', () => { this.removeHoop(); this.panel.hidden = true; });
     world.on('rebuilt', () => this.unlock('undo'));
@@ -65,12 +100,20 @@ export class Game {
   // ---------- achievements ----------
 
   unlock(id) {
+    // Another copy of the site (in the browser window) may have unlocked things too.
+    for (const got of load()) this.unlocked.add(got);
     if (this.unlocked.has(id)) return;
     this.unlocked.add(id);
     save([...this.unlocked]);
     const a = ACHIEVEMENTS.find((x) => x.id === id);
     this.toast(`Achievement: ${a.title}`, a.desc);
     this.renderPanel();
+    if (id === 'browser') {
+      this.toast('You unlocked a web browser', 'It lives in the Trophies panel. Try opening this site inside it.');
+      openBrowser();
+    }
+    const earned = [...this.unlocked].filter((x) => x !== 'browser').length;
+    if (earned >= BROWSER_AT) this.unlock('browser');
   }
 
   toast(title, desc) {
@@ -109,8 +152,13 @@ export class Game {
     this.panel.hidden = true;
     const h = document.createElement('h2');
     h.textContent = 'Achievements';
+    this.browserBtn = document.createElement('button');
+    this.browserBtn.type = 'button';
+    this.browserBtn.className = 'panel-browser';
+    this.browserBtn.textContent = 'Open the browser';
+    this.browserBtn.addEventListener('click', () => openBrowser());
     this.list = document.createElement('ul');
-    this.panel.append(h, this.list);
+    this.panel.append(h, this.browserBtn, this.list);
     document.body.append(this.panel);
     this.renderPanel();
   }
@@ -118,6 +166,7 @@ export class Game {
   renderPanel() {
     if (this.trophyBtn) this.trophyBtn.textContent = `Trophies ${this.unlocked.size}/${ACHIEVEMENTS.length}`;
     if (!this.list) return;
+    this.browserBtn.hidden = !this.unlocked.has('browser');
     this.list.replaceChildren(...ACHIEVEMENTS.map((a) => {
       const li = document.createElement('li');
       const got = this.unlocked.has(a.id);

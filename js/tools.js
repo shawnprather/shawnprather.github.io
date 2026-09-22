@@ -1,6 +1,8 @@
-// The toolbox: pointer and keyboard input, and every tool that acts on the world.
+// The toolbox: pointer and keyboard input, every tool that acts on the world,
+// and the switch between the modes (solar system, sand planets, putt-putt).
 
 import { clamp } from './world.js';
+import { fxEl } from './ui.js';
 
 const { Body, Bodies, Composite, Constraint } = window.Matter;
 
@@ -13,37 +15,46 @@ const TOOLS = [
   { id: 'planet', key: '6', label: 'Planet', hint: 'Click empty space to drop a planet. Nearby things start orbiting it. Click a planet to remove it.' },
   { id: 'shatter', key: '7', label: 'Shatter', hint: 'Click something to smash it into pieces.' },
   { id: 'sand', key: '8', label: 'Sand', hint: 'Click something to crumble it into sand.' },
+  { id: 'water', key: '9', label: 'Water', hint: 'Click to put a water valve there (up to 3). Click a valve to shut it off.' },
+];
+const MODES = [
+  { id: 'solar', key: 'o', label: 'Solar system', title: 'Everything orbits a sun. The section names become planets you can click to visit.',
+    hint: 'Solar system: click an orange planet to visit that section, or fling things into new orbits.' },
+  { id: 'accretion', key: 'n', label: 'Sand planets', title: 'Sand pulls on sand, so dust clumps together into planets.',
+    hint: 'Sand planets: dust pulls on dust. Sand or Shatter a few pieces to feed it.' },
+  { id: 'golf', key: 'p', label: 'Putt-putt', title: 'The pile freezes into a mini-golf course. Drag back from the ball to putt.',
+    hint: 'Putt-putt: drag back from the white ball and let go.' },
 ];
 const GRAVITY = {
   down: [0, 1, 'Gravity ↓'], up: [0, -1, 'Gravity ↑'], zero: [0, 0, 'Gravity off'],
   left: [-1, 0, 'Gravity ←'], right: [1, 0, 'Gravity →'],
 };
-const ORBIT_HINT = 'Solar system: click an orange planet to visit that section, or fling things into new orbits.';
 const MAX_PULL = 170;
 const SLING_POWER = 0.2;
 const MAX_SPEED = 42;
 
 export class Tools {
-  constructor(world, particles, orbits, game) {
+  constructor({ world, particles, orbits, game, accretion, golf, water, ascii }) {
     this.world = world;
     this.particles = particles;
     this.orbits = orbits;
     this.game = game;
+    this.water = water;
+    this.ascii = ascii;
+    this.golf = golf;
+    this.modes = { solar: orbits, accretion, golf };
+    this.mode = null;
     this.tool = 'grab';
     this.gravityMode = 'down';
     this.pointer = { x: 0, y: 0 };
     this.down = null;
     this.planets = [];
     this.hole = null;
+    golf.say = (msg) => this.say(msg);
 
     this.buildToolbar();
     world.on('broken', () => this.show());
     world.on('rebuild-start', () => this.hide());
-    world.on('orbit-off', () => {
-      this.orbitBtn.setAttribute('aria-pressed', 'false');
-      if (this.toolBeforeOrbit) this.setTool(this.toolBeforeOrbit);
-      this.toolBeforeOrbit = null;
-    });
     world.onStep(() => this.step());
     particles.overlays.push((ctx) => this.draw(ctx));
 
@@ -64,41 +75,50 @@ export class Tools {
     bar.hidden = true;
     bar.setAttribute('role', 'toolbar');
     bar.setAttribute('aria-label', 'Physics tools');
-    const row = document.createElement('div');
-    row.className = 'tb-row';
 
-    const button = (html, onClick, title) => {
+    const row = () => {
+      const r = document.createElement('div');
+      r.className = 'tb-row';
+      bar.append(r);
+      return r;
+    };
+    const button = (parent, html, onClick, title) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'tb-btn';
       b.innerHTML = html;
       if (title) b.title = title;
       b.addEventListener('click', onClick);
-      row.append(b);
+      parent.append(b);
       return b;
     };
 
+    const tools = row();
     this.toolBtns = {};
     for (const t of TOOLS) {
-      const b = button(`${t.label} <kbd>${t.key}</kbd>`, () => this.setTool(t.id), `${t.hint} (key ${t.key})`);
+      const b = button(tools, `${t.label} <kbd>${t.key}</kbd>`, () => this.setTool(t.id), `${t.hint} (key ${t.key})`);
       b.setAttribute('aria-pressed', 'false');
       this.toolBtns[t.id] = b;
     }
-    const sep = document.createElement('span');
-    sep.className = 'tb-sep';
-    row.append(sep);
-    this.gravBtn = button('', () => this.cycleGravity(), 'Cycle gravity: down, up, off (key G). Arrow keys point it any way.');
-    this.orbitBtn = button('Solar system <kbd>O</kbd>', () => this.toggleOrbit(),
-      'Everything orbits a sun. The section names become planets you can click to visit. (key O)');
-    this.orbitBtn.setAttribute('aria-pressed', 'false');
-    row.append(this.game.trophyButton());
-    const rebuild = button('Rebuild <kbd>Esc</kbd>', () => this.world.rebuild(), 'Put the page back together (key Esc)');
+
+    const modes = row();
+    this.gravBtn = button(modes, '', () => this.cycleGravity(), 'Cycle gravity: down, up, off (key G). Arrow keys point it any way.');
+    this.modeBtns = {};
+    for (const m of MODES) {
+      const b = button(modes, `${m.label} <kbd>${m.key.toUpperCase()}</kbd>`, () => this.toggleMode(m.id), `${m.title} (key ${m.key.toUpperCase()})`);
+      b.setAttribute('aria-pressed', 'false');
+      this.modeBtns[m.id] = b;
+    }
+    this.asciiBtn = button(modes, 'ASCII <kbd>A</kbd>', () => this.toggleAscii(), 'Redraw everything as text characters (key A)');
+    this.asciiBtn.setAttribute('aria-pressed', 'false');
+    modes.append(this.game.trophyButton());
+    const rebuild = button(modes, 'Rebuild <kbd>Esc</kbd>', () => this.world.rebuild(), 'Put the page back together (key Esc)');
     rebuild.classList.add('tb-rebuild');
 
     this.hint = document.createElement('p');
     this.hint.className = 'tb-hint';
     this.hint.setAttribute('aria-live', 'polite');
-    bar.append(row, this.hint);
+    bar.append(this.hint);
     document.body.append(bar);
     this.bar = bar;
   }
@@ -107,8 +127,8 @@ export class Tools {
     const css = getComputedStyle(document.documentElement);
     this.ink = css.getPropertyValue('--ink').trim();
     this.accent = css.getPropertyValue('--accent').trim();
-    const masses = this.world.items.map((it) => it.w * it.h).sort((a, b) => a - b);
-    this.refArea = masses[masses.length >> 1] || 1;
+    const areas = this.world.items.map((it) => it.w * it.h).sort((a, b) => a - b);
+    this.refArea = areas[areas.length >> 1] || 1;
     this.bar.hidden = false;
     this.setGravity('down', true);
     this.setTool(this.tool);
@@ -117,30 +137,37 @@ export class Tools {
   }
 
   hide() {
+    this.exitMode(true);
     this.endGrab();
     this.cancelSling();
     this.endMagnet();
-    if (this.hole) this.closeHole(false);
+    if (this.hole) this.closeHole();
     this.planets.forEach((p) => p.el.remove());
     this.planets = [];
     this.down = null;
     this.bar.hidden = true;
     this.gravityMode = 'down';
+    this.asciiBtn.setAttribute('aria-pressed', 'false');
     document.documentElement.classList.remove('dragging');
     document.documentElement.removeAttribute('data-tool');
   }
 
   setTool(id) {
+    // Putt-putt owns the pointer, so picking a tool ends the round.
+    if (this.mode === 'golf') {
+      this.exitMode();
+      this.setGravity('down');
+    }
     this.tool = id;
     document.documentElement.dataset.tool = id;
     for (const [tid, b] of Object.entries(this.toolBtns)) b.setAttribute('aria-pressed', String(tid === id));
     const hint = TOOLS.find((t) => t.id === id).hint;
-    if (this.orbits.active) this.say(hint);
+    if (this.mode) this.say(hint);
     else this.hint.textContent = hint;
   }
 
   baseHint() {
-    return this.orbits.active ? ORBIT_HINT : TOOLS.find((t) => t.id === this.tool).hint;
+    return this.mode ? MODES.find((m) => m.id === this.mode).hint : TOOLS.find((t) => t.id === this.tool).hint;
   }
 
   say(msg) {
@@ -151,7 +178,7 @@ export class Tools {
     }, 3000);
   }
 
-  // ---------- gravity + orbit ----------
+  // ---------- gravity + modes ----------
 
   cycleGravity() {
     const next = { down: 'up', up: 'zero', zero: 'down' }[this.gravityMode] || 'down';
@@ -159,7 +186,7 @@ export class Tools {
   }
 
   setGravity(mode, quiet = false) {
-    if (this.orbits.active && mode !== 'zero') this.orbits.exit();
+    if (this.mode && mode !== 'zero') this.exitMode();
     const [x, y, label] = GRAVITY[mode];
     const g = this.world.gravity;
     g.x = x;
@@ -167,9 +194,10 @@ export class Tools {
     this.gravityMode = mode;
     this.gravBtn.innerHTML = `${label} <kbd>G</kbd>`;
     if (quiet) return;
-    if (mode === 'zero' && !this.orbits.active) {
+    if (mode === 'zero' && !this.mode) {
       // A gentle push so things drift instead of just stopping.
       for (const it of this.world.liveItems()) {
+        if (it.pinned) continue;
         Body.setVelocity(it.body, { x: it.body.velocity.x + rand(1.5), y: it.body.velocity.y + rand(1.5) - 1 });
         Body.setAngularVelocity(it.body, rand(0.03));
       }
@@ -177,23 +205,49 @@ export class Tools {
     this.world.emit('gravity', mode);
   }
 
-  toggleOrbit() {
-    if (this.orbits.active) {
-      this.orbits.exit();
+  // The modes all need gravity off and are mutually exclusive.
+  toggleMode(id) {
+    if (this.world.state !== 'broken') return;
+    if (this.mode === id) {
+      this.exitMode();
       this.setGravity('down');
       return;
     }
+    this.exitMode();
     this.endGrab();
     this.cancelSling();
     this.setGravity('zero', true);
-    this.gravBtn.innerHTML = 'Gravity off <kbd>G</kbd>';
-    // Clicking planets only works with Grab, so switch to it for the tour.
-    this.toolBeforeOrbit = this.tool;
-    this.orbits.enter();
-    this.setTool('grab');
-    this.orbitBtn.setAttribute('aria-pressed', 'true');
+    this.toolBeforeMode = this.tool;
+    // Clicking planets needs Grab; putt-putt takes over the pointer anyway.
+    if (id !== 'accretion') this.setTool('grab');
+    this.mode = id;
+    this.modes[id].enter();
+    this.modeBtns[id].setAttribute('aria-pressed', 'true');
     clearTimeout(this.sayTimer);
-    this.hint.textContent = ORBIT_HINT;
+    this.hint.textContent = this.baseHint();
+    this.world.emit('mode', id);
+  }
+
+  exitMode(fromRebuild = false) {
+    const id = this.mode;
+    if (!id) return;
+    this.mode = null;
+    this.modes[id].exit(fromRebuild);
+    this.modeBtns[id].setAttribute('aria-pressed', 'false');
+    if (this.toolBeforeMode && !fromRebuild) {
+      this.tool = this.toolBeforeMode;
+      document.documentElement.dataset.tool = this.tool;
+      for (const [tid, b] of Object.entries(this.toolBtns)) b.setAttribute('aria-pressed', String(tid === this.tool));
+      this.hint.textContent = this.baseHint();
+    }
+    this.toolBeforeMode = null;
+    this.world.emit('mode-off', id);
+  }
+
+  toggleAscii() {
+    const on = !this.ascii.on;
+    this.ascii.set(on);
+    this.asciiBtn.setAttribute('aria-pressed', String(on));
   }
 
   // ---------- input ----------
@@ -201,7 +255,7 @@ export class Tools {
   onDown(e) {
     const w = this.world;
     if (w.state !== 'broken' || e.button !== 0) return;
-    if (e.target.closest('.toolbar, .trophy-panel')) return;
+    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt')) return;
     if (this.down) {
       // A second finger is ignored; a mouse that was released outside the window is reset.
       if (e.pointerType !== 'mouse') return;
@@ -215,6 +269,7 @@ export class Tools {
     this.down = { id: e.pointerId, x: p.x, y: p.y, item };
     this.panelClose();
 
+    if (this.mode === 'golf') { this.golf.down(p); return; }
     switch (this.tool) {
       case 'grab': this.startGrab(item, p); break;
       case 'sling': this.startSling(item, p); break;
@@ -224,6 +279,7 @@ export class Tools {
       case 'planet': this.togglePlanet(p); break;
       case 'shatter': if (item) this.shatter(item, p); break;
       case 'sand': if (item) this.sandify(item); break;
+      case 'water': this.water.toggleValve(p, (msg) => this.say(msg)); break;
     }
   }
 
@@ -232,12 +288,14 @@ export class Tools {
     this.pointer = p;
     if (!this.down || e.pointerId !== this.down.id) return;
     if (Math.hypot(p.x - this.down.x, p.y - this.down.y) > 6) this.dragged = true;
+    if (this.mode === 'golf') this.golf.move(p);
     if (this.grab) this.grab.pointA = { x: p.x, y: p.y };
     if (this.magnet) { this.magnet.x = p.x; this.magnet.y = p.y; }
   }
 
   onUp(e) {
     if (!this.down || e.pointerId !== this.down.id) return;
+    if (this.mode === 'golf') this.golf.up();
     this.endGrab();
     this.releaseSling();
     this.endMagnet();
@@ -250,16 +308,16 @@ export class Tools {
   onClick(e) {
     const w = this.world;
     if (w.state === 'normal') return;
-    if (e.target.closest('.toolbar, .trophy-panel')) return;
+    if (e.target.closest('.toolbar, .trophy-panel, .browser-win, .ttt')) return;
     if (w.state === 'rebuilding') { e.preventDefault(); e.stopPropagation(); return; }
     const keyboard = e.detail === 0;
-    if (!keyboard && (this.dragged || !['grab', 'sling'].includes(this.tool))) {
+    if (!keyboard && (this.dragged || this.mode === 'golf' || !['grab', 'sling'].includes(this.tool))) {
       e.preventDefault();
       e.stopPropagation();
       return;
     }
     const planet = e.target.closest('[data-section]');
-    if (planet && this.orbits.active) {
+    if (planet && this.mode === 'solar') {
       e.preventDefault();
       this.goTo('#' + planet.dataset.section);
       return;
@@ -286,13 +344,16 @@ export class Tools {
   onKey(e) {
     const w = this.world;
     if (w.state !== 'broken' || e.ctrlKey || e.metaKey || e.altKey) return;
-    const k = e.key;
+    if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const tool = TOOLS.find((t) => t.key === k);
+    const mode = MODES.find((m) => m.key === k);
     const arrows = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
     if (tool) this.setTool(tool.id);
-    else if (k === 'Escape' || k === 'r' || k === 'R') w.rebuild();
-    else if (k === 'g' || k === 'G') this.cycleGravity();
-    else if (k === 'o' || k === 'O') this.toggleOrbit();
+    else if (mode) this.toggleMode(mode.id);
+    else if (k === 'Escape' || k === 'r') w.rebuild();
+    else if (k === 'g') this.cycleGravity();
+    else if (k === 'a') this.toggleAscii();
     else if (arrows[k]) this.setGravity(arrows[k]);
     else return;
     e.preventDefault();
@@ -337,7 +398,7 @@ export class Tools {
         if (d < 28 + size * 0.2) this.swallow(it);
       }
       this.particles.liftSand(h.field.x, h.field.y, 150, 60, () => [rand(0.5), rand(0.5)]);
-      if (h.t >= h.life) this.closeHole(true);
+      if (h.t >= h.life) this.closeHole();
     }
   }
 
@@ -454,7 +515,7 @@ export class Tools {
   // ---------- black hole ----------
 
   openHole(p) {
-    if (this.hole) this.closeHole(false);
+    if (this.hole) this.closeHole();
     const el = fxEl('blackhole');
     el.style.transform = `translate(${p.x}px, ${p.y}px)`;
     const field = { kind: 'grav', x: p.x, y: p.y, GM: 16000, rmin: 30, sinkR: 30 };
@@ -462,14 +523,13 @@ export class Tools {
     this.hole = { el, field, t: 0, life: 480 };
   }
 
-  closeHole(burst) {
+  // The hole quietly shrinks away; whatever it ate stays gone until Rebuild.
+  closeHole() {
     const h = this.hole;
     this.hole = null;
     this.world.fields = this.world.fields.filter((f) => f !== h.field);
     h.el.classList.add('pop');
-    setTimeout(() => h.el.remove(), 400);
-    // Hawking radiation: it gives a little bit back on the way out.
-    if (burst) this.particles.burst(h.field.x, h.field.y, 400, [this.accent, '#FFB36B', this.ink], 7);
+    setTimeout(() => h.el.remove(), 600);
   }
 
   swallow(item) {
@@ -593,14 +653,6 @@ export class Tools {
       ctx.restore();
     }
   }
-}
-
-function fxEl(kind) {
-  const el = document.createElement('div');
-  el.className = `${kind} fx-el`;
-  el.setAttribute('aria-hidden', 'true');
-  document.body.append(el);
-  return el;
 }
 
 function capSpeed(b) {

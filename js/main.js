@@ -4,8 +4,13 @@
 import { World } from './world.js';
 import { Particles } from './particles.js';
 import { Orbits } from './orbits.js';
+import { Accretion } from './accretion.js';
+import { Water } from './water.js';
+import { Golf } from './golf.js';
+import { Ascii } from './ascii.js';
 import { Game } from './game.js';
 import { Tools } from './tools.js';
+import { TicTacToe } from './ttt.js';
 
 if (window.Matter) start();
 
@@ -14,8 +19,13 @@ function start() {
   const particles = new Particles(world);
   const orbits = new Orbits(world);
   particles.overlays.push((ctx) => orbits.drawTrails(ctx));
+  const accretion = new Accretion(world, particles);
+  const water = new Water(world, particles);
+  const golf = new Golf(world, orbits, particles);
+  const ascii = new Ascii(world, particles);
   const game = new Game(world, particles);
-  const tools = new Tools(world, particles, orbits, game);
+  const tools = new Tools({ world, particles, orbits, game, accretion, golf, water, ascii });
+  new TicTacToe(world);
 
   const btn = document.createElement('button');
   btn.type = 'button';

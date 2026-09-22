@@ -17,6 +17,11 @@ const { Composite } = window.Matter;
 const MAX = 26000;
 const CRUMBLE_STEPS = 50;
 
+// Water is stored like sand, told apart by an alpha byte of 0xFE instead of 0xFF.
+export const WATER_A = 0xfe;
+const WATER_COLS = ['#2F7FE0', '#3787E6'].map((hex) => ((cssToABGR(hex) & 0xffffff) | (WATER_A << 24)) >>> 0);
+const WATER_CAP = 30000;
+
 export class Particles {
   constructor(world) {
     this.world = world;
@@ -41,6 +46,9 @@ export class Particles {
     this.overlays = [];
     this.maskBodies = [];
     this.out = [0, 0];
+    this.waterTotal = 0;
+    this.selfGravity = null; // set by sand planets mode
+    this.hidePixels = false; // set by ASCII mode, which draws the sand itself
 
     world.on('broken', () => { document.body.append(this.canvas); this.resize(); });
     world.on('rebuild-start', () => this.clear());
@@ -52,6 +60,7 @@ export class Particles {
   clear() {
     this.n = 0;
     this.sandCount = 0;
+    this.waterTotal = 0;
     this.crumbling = [];
     this.grid?.fill(0);
     this.canvas.remove();
@@ -70,6 +79,10 @@ export class Particles {
     this.gh = Math.ceil(H / this.C);
     this.grid = new Uint32Array(this.gw * this.gh);
     this.mask = new Uint8Array(this.gw * this.gh);
+    this.prevMask = new Uint8Array(this.gw * this.gh);
+    this.occ = new Uint8Array(this.gw * this.gh);
+    this.done = new Uint8Array(this.gw * this.gh);
+    this.offsets = null;
     this.sandCount = 0;
     this.pix.width = this.gw;
     this.pix.height = this.gh;
@@ -203,7 +216,10 @@ export class Particles {
   // ---------- the pieces, as seen by the sand ----------
 
   // Paints every physics piece into the mask (value = index into maskBodies).
+  // Last step's mask is kept: a grain only gets pushed if a piece overlapped it
+  // two steps running, so a resting piece's sub-pixel jitter doesn't shove sand.
   buildMask() {
+    [this.prevMask, this.mask] = [this.mask, this.prevMask];
     const { mask, gw, gh, C } = this;
     mask.fill(0);
     const list = this.maskBodies;
@@ -243,6 +259,39 @@ export class Particles {
     return this.grid[idx] !== 0 || this.mask[idx] !== 0;
   }
 
+  // The closest open cell to (cx, cy), never further along gravity, preferring up.
+  // Keeps displaced sand next to the piece that moved it instead of teleporting it
+  // to the far side. Falls back to a straight search against gravity.
+  findFree(cx, cy, dir) {
+    const { grid, mask, gw, gh } = this;
+    const key = dir.join();
+    if (this.offsets?.key !== key) {
+      const list = [];
+      for (let oy = -4; oy <= 4; oy++) {
+        for (let ox = -4; ox <= 4; ox++) {
+          const along = ox * dir[0] + oy * dir[1];
+          const d = Math.hypot(ox, oy);
+          if ((ox || oy) && along <= 0 && d <= 4.5) list.push([ox, oy, d + along * 0.01]);
+        }
+      }
+      list.sort((a, b) => a[2] - b[2]);
+      this.offsets = { key, list };
+    }
+    for (const [ox, oy] of this.offsets.list) {
+      const x = cx + ox, y = cy + oy;
+      if (x < 0 || y < 0 || x >= gw || y >= gh) continue;
+      const j = y * gw + x;
+      if (!grid[j] && !mask[j]) return j;
+    }
+    for (let t = 5; t <= 80; t++) {
+      const x = cx - dir[0] * t, y = cy - dir[1] * t;
+      if (x < 0 || y < 0 || x >= gw || y >= gh) break;
+      const j = y * gw + x;
+      if (!grid[j] && !mask[j]) return j;
+    }
+    return -1;
+  }
+
   // ---------- simulation ----------
 
   step() {
@@ -260,10 +309,19 @@ export class Particles {
     const hasFields = world.fields.length > 0;
     const X = this.x, Y = this.y, VX = this.vx, VY = this.vy;
 
+    // Sand planets: grains pull on each other, and bump into each other instead
+    // of passing through, so clumps pack into solid little worlds.
+    const sg = this.selfGravity;
+    if (sg) {
+      sg.compute(this);
+      this.markFlying();
+    }
+    const occ = this.occ;
+
     let i = 0;
     while (i < this.n) {
       if (this.delay[i] > 0) { this.delay[i]--; i++; continue; }
-      if (--this.life[i] <= 0) { this.kill(i); continue; }
+      if (!sg && --this.life[i] <= 0) { this.kill(i); continue; }
       let vx = VX[i] + gx, vy = VY[i] + gy;
       const x0 = X[i], y0 = Y[i];
       if (hasFields) {
@@ -271,16 +329,26 @@ export class Particles {
         vx += out[0];
         vy += out[1];
       }
+      if (sg) {
+        sg.sample(x0, y0, out);
+        vx += out[0];
+        vy += out[1];
+      }
       vx *= 0.992;
       vy *= 0.992;
 
-      // Buried inside a pile or a piece: climb out against gravity.
+      // Buried inside a pile or a piece (two grains landed in the same cell, or a
+      // piece moved over it): settle it into the nearest open cell right away.
+      // Moving it there as a flying grain instead made whole clumps pile into the
+      // same cell again every step, which is what made the sand jump.
       const inside = this.solidAt((x0 / C) | 0, (y0 / C) | 0);
       if (inside && dir) {
-        X[i] = clampTo(x0 - dir[0] * C, W);
-        Y[i] = clampTo(y0 - dir[1] * C, H);
-        VX[i] = VY[i] = 0;
-        i++;
+        const j = this.findFree((x0 / C) | 0, (y0 / C) | 0, dir);
+        if (j >= 0) {
+          grid[j] = this.col[i];
+          this.sandCount++;
+        }
+        this.kill(i);
         continue;
       }
 
@@ -294,10 +362,12 @@ export class Particles {
       let hit = false;
       if (!inside) {
         const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / C);
+        const start = ((y0 / C) | 0) * gw + ((x0 / C) | 0);
         let px = x0, py = y0;
         for (let s = 1; s <= n; s++) {
           const tx = x0 + ((x1 - x0) * s) / n, ty = y0 + ((y1 - y0) * s) / n;
-          if (this.solidAt((tx / C) | 0, (ty / C) | 0)) { hit = true; break; }
+          const tcx = (tx / C) | 0, tcy = (ty / C) | 0;
+          if (this.solidAt(tcx, tcy) || (sg && tcy * gw + tcx !== start && occ[tcy * gw + tcx])) { hit = true; break; }
           px = tx; py = ty;
         }
         if (hit) { x1 = px; y1 = py; }
@@ -318,6 +388,9 @@ export class Particles {
           }
         }
         if (hit) { vx *= 0.2; vy *= 0.2; } // clipped a side: lose speed, then fall
+      } else if (hit && sg) {
+        vx *= 0.15; // grains in a clump stick together
+        vy *= 0.15;
       } else if (hit) {
         vx *= -0.3;
         vy *= -0.3;
@@ -329,11 +402,33 @@ export class Particles {
 
     if (!this.sandCount) return;
     if (dir) {
+      // Mark cells that flying grains are in. The resting sand treats them as
+      // taken; otherwise a neighbour slides into the cell a grain just fell out
+      // of, buries it, and the two keep knocking each other loose forever.
+      this.markFlying();
       this.stepSand(dir);
       this.stepSand(dir);
     } else {
       this.scatterBuried();
     }
+  }
+
+  markFlying() {
+    const { occ, C, gw, gh, x: X, y: Y } = this;
+    occ.fill(0);
+    for (let k = 0; k < this.n; k++) {
+      if (this.delay[k]) continue;
+      const cx = (X[k] / C) | 0, cy = (Y[k] / C) | 0;
+      if (cx >= 0 && cy >= 0 && cx < gw && cy < gh) occ[cy * gw + cx] = 1;
+    }
+  }
+
+  // Water pouring out of a valve.
+  pour(x, y, vx, vy) {
+    if (this.waterTotal >= WATER_CAP) return false;
+    if (this.add(x, y, vx, vy, WATER_COLS[(Math.random() * WATER_COLS.length) | 0]) < 0) return false;
+    this.waterTotal++;
+    return true;
   }
 
   stepCrumble() {
@@ -353,12 +448,13 @@ export class Particles {
   // A grain with nothing under it starts falling; otherwise it tries to slide
   // diagonally; a grain that a piece moved on top of gets pushed out.
   stepSand(dir) {
-    const { grid, mask, gw, gh, C } = this;
+    const { grid, mask, prevMask, occ, done, gw, gh, C } = this;
     const vert = dir[1] !== 0;
     const s = vert ? dir[1] : dir[0];
     const U = vert ? gh : gw, V = vert ? gw : gh;
     const su = vert ? gw : 1, sv = vert ? 1 : gw;
     const flip = (this.frame++ & 1) === 1;
+    done.fill(0); // water that already flowed sideways this pass
 
     for (let k = 0; k < U - 1; k++) {
       const u = s > 0 ? U - 2 - k : 1 + k;
@@ -367,15 +463,37 @@ export class Particles {
         const v = flip ? V - 1 - m : m;
         const idx = base + v * sv;
         const c = grid[idx];
-        if (!c) continue;
-        if (mask[idx]) { this.pushOut(idx, c, u, v, s, su, sv, U, vert); continue; }
+        if (!c || done[idx]) continue;
+        if (mask[idx]) {
+          if (prevMask[idx]) this.pushOut(idx, c, vert ? v : u, vert ? u : v, dir);
+          continue;
+        }
 
         const below = next + v * sv;
-        if (!grid[below] && !mask[below]) {
+        if (occ[below]) continue; // a flying grain is passing underneath: wait
+        const water = (c >>> 24) === WATER_A;
+        const under = grid[below];
+        // Sand is heavier than water: it swaps its way down through a pool.
+        if (!water && under && (under >>> 24) === WATER_A) {
+          if (Math.random() < 0.5) { grid[below] = c; grid[idx] = under; }
+          continue;
+        }
+        if (!under && !mask[below]) {
+          // A one-cell gap (a hole inside a pile) just closes; only a real drop
+          // turns the grain into a flying one. Otherwise holes bubble up through
+          // settled piles one flickering grain at a time.
+          const u2 = u + 2 * s;
+          const below2 = u2 >= 0 && u2 < U ? u2 * su + v * sv : -1;
+          if (below2 < 0 || grid[below2] || mask[below2]) {
+            grid[below] = c;
+            grid[idx] = 0;
+            continue;
+          }
           const col = vert ? v : u, row = vert ? u : v;
           if (this.add((col + 0.5) * C, (row + 0.5) * C,
             vert ? rand(0.15) : s * 0.5, vert ? s * 0.5 : rand(0.15), c) >= 0) {
             grid[idx] = 0;
+            occ[idx] = 1;
             this.sandCount--;
           } else {
             grid[below] = c;
@@ -385,55 +503,69 @@ export class Particles {
         }
 
         const r = Math.random() < 0.5 ? -1 : 1;
-        for (let t = 0; t < 2; t++) {
+        let moved = false;
+        for (let t = 0; t < 2 && !moved; t++) {
           const v2 = v + (t ? -r : r);
           if (v2 < 0 || v2 >= V) continue;
           const diag = next + v2 * sv, side = base + v2 * sv;
-          if (!grid[diag] && !mask[diag] && !grid[side] && !mask[side]) {
+          if (!grid[diag] && !mask[diag] && !occ[diag] && !grid[side] && !mask[side] && !occ[side]) {
             grid[diag] = c;
             grid[idx] = 0;
-            break;
+            moved = true;
+          }
+        }
+        if (moved || !water) continue;
+
+        // Water that can't go down spreads sideways, up to 3 cells a pass.
+        for (let t = 0; t < 2 && !moved; t++) {
+          const dv = t ? -r : r;
+          let to = -1;
+          for (let d = 1; d <= 3; d++) {
+            const v2 = v + dv * d;
+            if (v2 < 0 || v2 >= V) break;
+            const j = base + v2 * sv;
+            if (grid[j] || mask[j] || occ[j]) break;
+            to = j;
+            if (!grid[next + v2 * sv] && !mask[next + v2 * sv]) break; // found an edge to spill over
+          }
+          if (to >= 0) {
+            grid[to] = c;
+            grid[idx] = 0;
+            done[to] = 1;
+            moved = true;
           }
         }
       }
     }
   }
 
-  // A piece moved onto a resting grain. A fast piece splashes it; a slow one
-  // pushes it up to the first free cell above.
-  pushOut(idx, c, u, v, s, su, sv, U, vert) {
-    const { grid, mask, C } = this;
+  // A piece moved onto a resting grain. Usually it just nudges the grain to the
+  // nearest open cell; only a real impact (a thrown or falling piece) splashes it.
+  pushOut(idx, c, cx, cy, dir) {
+    const { grid, mask, gw, C } = this;
+    const free = this.findFree(cx, cy, dir);
+    if (free < 0) return;
     const b = this.maskBodies[mask[idx]];
-    let free = -1, fu = u;
-    for (let t = 1; t <= 80; t++) {
-      const u2 = u - s * t;
-      if (u2 < 0 || u2 >= U) break;
-      const j = u2 * su + v * sv;
-      if (!grid[j] && !mask[j]) { free = j; fu = u2; break; }
-    }
     const speed = b ? Math.hypot(b.velocity.x, b.velocity.y) : 0;
-    if (speed > 1.5 && free >= 0) {
-      const col = vert ? v : fu, row = vert ? fu : v;
-      const kick = 1 + speed * 0.4;
-      if (this.add((col + 0.5) * C, (row + 0.5) * C,
-        b.velocity.x * 0.5 + rand(1.2) - (vert ? 0 : s * kick),
-        b.velocity.y * 0.5 + rand(1.2) - (vert ? s * kick : 0), c) >= 0) {
+    if (speed > 6) {
+      const kick = Math.min(3, 0.5 + speed * 0.12);
+      if (this.add(((free % gw) + 0.5) * C, (((free / gw) | 0) + 0.5) * C,
+        b.velocity.x * 0.4 + rand(0.8) - dir[0] * kick,
+        b.velocity.y * 0.4 + rand(0.8) - dir[1] * kick, c) >= 0) {
         grid[idx] = 0;
         this.sandCount--;
         return;
       }
     }
-    if (free >= 0) {
-      grid[free] = c;
-      grid[idx] = 0;
-    }
+    grid[free] = c;
+    grid[idx] = 0;
   }
 
   // Zero gravity: nothing piles up, but pieces drifting through sand scatter it.
   scatterBuried() {
-    const { grid, mask, gw, C } = this;
+    const { grid, mask, prevMask, gw, C } = this;
     for (let idx = 0; idx < grid.length; idx++) {
-      if (!grid[idx] || !mask[idx]) continue;
+      if (!grid[idx] || !mask[idx] || !prevMask[idx]) continue;
       const b = this.maskBodies[mask[idx]];
       const x = idx % gw, y = (idx / gw) | 0;
       if (this.add((x + 0.5) * C, (y + 0.5) * C, (b?.velocity.x || 0) + rand(1), (b?.velocity.y || 0) + rand(1), grid[idx]) < 0) return;
@@ -459,8 +591,10 @@ export class Particles {
         if (cx >= 0 && cx < gw && cy >= 0 && cy < gh) buf[cy * gw + cx] = this.col[i];
       }
       this.pctx.putImageData(this.img, 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(this.pix, 0, 0, gw * this.D, gh * this.D);
+      if (!this.hidePixels) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(this.pix, 0, 0, gw * this.D, gh * this.D);
+      }
     }
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     for (const draw of this.overlays) draw(ctx);
@@ -469,7 +603,7 @@ export class Particles {
 
 // Paints an element (background, borders, text, images) onto a canvas at 1:1,
 // so its real pixels can become particles.
-function rasterize(el, w, h) {
+export function rasterize(el, w, h) {
   const W = Math.max(1, Math.ceil(w)), H = Math.max(1, Math.ceil(h));
   const cv = document.createElement('canvas');
   cv.width = W;
@@ -571,5 +705,4 @@ function cssToABGR(hex) {
   return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
 }
 
-function clampTo(v, max) { return v < 0 ? 0 : v > max ? max : v; }
 function rand(n) { return (Math.random() - 0.5) * 2 * n; }
