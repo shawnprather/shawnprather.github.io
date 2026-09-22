@@ -3,21 +3,194 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hello</title>
+  <title>Shawn Prather</title>
+  <meta name="description" content="Shawn Prather: Computer Science at Colorado School of Mines. AI, full-stack, and hardware. Also, a website you can break.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='42' fill='%23FF3D00' stroke='%23111' stroke-width='8'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400..800&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <h1>Hello, world.</h1>
+  <a class="skip-link" href="#main">Skip to content</a>
 
-  <p>
-    This page is live. That is the only thing it is here to prove.
-  </p>
+  <header class="hero">
+    <p class="kicker" data-phys>Computer Science &middot; Colorado School of Mines</p>
 
-  <p>
-    Everything about it is yours to delete. Open Claude Code in this folder and
-    tell it what you actually want to build.
-  </p>
+    <h1 class="name" data-phys="letters">
+      <span class="line first-name">Shawn</span>
+      <span class="line">Prather.</span>
+    </h1>
 
+    <p class="tagline" data-phys>I build cool things: AI systems, full-stack apps, and hardware.</p>
+
+    <div class="hero-actions" id="break-slot"></div>
+
+    <nav class="site-nav" aria-label="Sections" data-phys>
+      <a href="#about">About</a>
+      <a href="#projects">Projects</a>
+      <a href="#experience">Experience</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
+
+  <main id="main">
+
+    <section id="about" class="section" aria-labelledby="about-title">
+      <h2 id="about-title" data-phys>About</h2>
+      <div class="prose">
+        <p data-phys>
+          I'm a Computer Science student at Colorado School of Mines, focusing on
+          Software Engineering, Artificial Intelligence, and Full-Stack Development.
+          I love designing and building cool things, and I enjoy tackling complex problems.
+        </p>
+        <p data-phys>
+          Right now I'm a software engineering intern at ICR, building data pipelines
+          and visualizations for orbital mechanics software. That's why this page has
+          an orbit mode.
+        </p>
+        <p data-phys>
+          I also enjoy working with computers and hardware, whether it's building computers,
+          designing PCBs, soldering, or messing around in Linux. My current tech stack includes
+          C#, C++, Java Spring, Python, TypeScript, React, PostgreSQL, Docker, and AWS.
+        </p>
+        <p data-phys>
+          When I'm not coding, I enjoy building and flying drones, learning Japanese,
+          traveling, and spending time with my two pet rabbits 🐰🐰!
+        </p>
+      </div>
+
+      <aside id="secret" class="card secret" data-phys hidden>
+        <p class="card-label">Secret unlocked</p>
+        <h3>Meet the rabbits</h3>
+        <p>You swished every letter of my name. Your prize: the knowledge that two rabbits
+          supervise all of my code reviews. 🐰🐰</p>
+      </aside>
+    </section>
+
+    <section id="projects" class="section" aria-labelledby="projects-title">
+      <h2 id="projects-title" data-phys>Projects</h2>
+      <ul class="cards" role="list">
+        <li class="card" data-phys>
+          <p class="card-label">Ongoing</p>
+          <h3>Embodied AI Quadruped Robot</h3>
+          <p>A four-legged robot with split compute. An ESP32-S3 runs real-time control of
+            8 servos, an IMU, and an 8&times;8 time-of-flight depth array, while a
+            Raspberry Pi Zero 2W handles the camera, audio, and cloud-LLM communication.</p>
+          <p class="tags">C++20 &middot; ESP-IDF &middot; Go &middot; Raspberry Pi</p>
+        </li>
+        <li class="card" data-phys>
+          <h3>AI-Powered Semantic Relations Graph</h3>
+          <p>An async document-ingestion pipeline feeding a live knowledge graph, with semantic
+            search across 10K+ documents. A dynamic tag hierarchy splits overloaded tags into
+            subcategories and merges related ones into parent concepts using LLM extraction
+            and embeddings.</p>
+          <p class="tags">Python &middot; FastAPI &middot; Celery &middot; Next.js &middot; pgvector</p>
+        </li>
+        <li class="card" data-phys>
+          <p class="card-label">Top 5%</p>
+          <h3>NP-Hard Hackathon: Tents and Trees</h3>
+          <p>A 72-hour competition. I wrote a multi-threaded genetic cooling algorithm that
+            solves 100,000-tile puzzle instances in under 0.1 seconds.</p>
+          <p class="tags">C++20 &middot; Genetic algorithms &middot; Multithreading</p>
+        </li>
+        <li class="card" data-phys>
+          <h3>This website</h3>
+          <p>A personal site you are allowed to break. Plain HTML, CSS, and JavaScript, with
+            Matter.js doing the physics and a hand-rolled particle system for the sand.</p>
+          <p class="tags">JavaScript &middot; Matter.js &middot; Canvas</p>
+        </li>
+      </ul>
+    </section>
+
+    <section id="experience" class="section" aria-labelledby="experience-title">
+      <h2 id="experience-title" data-phys>Experience</h2>
+      <ol class="timeline" role="list">
+        <li data-phys>
+          <p class="when">May 2026 &ndash; Present</p>
+          <div>
+            <h3>Software Engineer Intern <span class="org">ICR, Inc.</span></h3>
+            <p>Data pipelines and Angular visualizations for orbital mechanics software in
+              TypeScript and Java, rendering physics-model orbit predictions for operators.</p>
+          </div>
+        </li>
+        <li data-phys>
+          <p class="when">Sep 2025 &ndash; 2026</p>
+          <div>
+            <h3>Graduate AI/ML Researcher <span class="org">AI Research Lab @ Mines</span></h3>
+            <p>Built an LLM benchmarking API that scores model outputs against verifiable
+              Linear Programming ground truth. Found frontier accuracy lasts 44% longer on
+              ramping-difficulty problems across ChatGPT, Gemini, and Claude.</p>
+          </div>
+        </li>
+        <li data-phys>
+          <p class="when">Sep &ndash; Dec 2025</p>
+          <div>
+            <h3>Software Engineer, Industry Capstone <span class="org">Qualcomm</span></h3>
+            <p>Cut RF config lookup from 20&ndash;30 minutes to about 1 minute for 20 engineers
+              with a LangGraph RAG system over 4,000+ files and 500K+ lines of JSON.</p>
+          </div>
+        </li>
+        <li data-phys>
+          <p class="when">May &ndash; Sep 2025</p>
+          <div>
+            <h3>Software Engineer Intern <span class="org">Lockheed Martin</span></h3>
+            <p>Migrated a legacy C codebase to C#/.NET Core, cutting execution time 35%, and
+              automated build, test, and risk checks with a Bazel, Jenkins, and RPM pipeline.</p>
+          </div>
+        </li>
+        <li data-phys>
+          <p class="when">Dec 2024 &ndash; May 2025</p>
+          <div>
+            <h3>Full-Stack Developer <span class="org">Packtrain</span></h3>
+            <p>Helped scale a course platform from 900 to 7,500+ students on a team of four:
+              Spring Boot, PostgreSQL, and React-TypeScript at 80% test coverage.</p>
+          </div>
+        </li>
+        <li data-phys>
+          <p class="when">Aug 2024 &ndash; Aug 2025</p>
+          <div>
+            <h3>Undergraduate Researcher <span class="org">Aria Lab @ Mines</span></h3>
+            <p>Built a distributed RTK-GPS system (rover plus 4 base stations) for a Boston
+              Dynamics Spot SLAM backpack in ROS2 and Docker, hitting 1&nbsp;cm accuracy in
+              bad weather.</p>
+          </div>
+        </li>
+      </ol>
+
+      <div class="facts">
+        <div class="fact" data-phys>
+          <h3>Education</h3>
+          <p>M.S. Computer Science, Colorado School of Mines, 2025&ndash;2027</p>
+          <p>B.S. Computer Science, Colorado School of Mines, 2024&ndash;2026.
+            C-MAPP Scholar, Tau Beta Pi.</p>
+        </div>
+        <div class="fact" data-phys>
+          <h3>Tools</h3>
+          <p>TypeScript, Python, Go, Java, C++, Rust, C#, SQL. React, Next.js, FastAPI,
+            Spring Boot, PostgreSQL. LangGraph, RAG, PyTorch. Docker, Kubernetes, AWS, CI/CD.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="section" aria-labelledby="contact-title">
+      <h2 id="contact-title" data-phys>Contact</h2>
+      <ul class="links" role="list">
+        <li data-phys><a href="mailto:contact@shawnprather.dev">contact@shawnprather.dev</a></li>
+        <li data-phys><a href="https://github.com/shawnprather">GitHub</a></li>
+        <li data-phys><a href="https://www.linkedin.com/in/shawn-prather/">LinkedIn</a></li>
+        <li data-phys><a href="https://shawnprather.dev/">shawnprather.dev</a></li>
+      </ul>
+    </section>
+
+  </main>
+
+  <footer class="site-footer" data-phys>
+    <p>Built with Claude Code for CSCI 498E. Physics by Matter.js. Rabbits not included.</p>
+  </footer>
+
+  <script src="js/vendor/matter.min.js" defer></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
