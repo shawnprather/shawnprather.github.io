@@ -68,9 +68,22 @@ export class Particles {
 
   resize() {
     const { W, H } = this.world;
+    // Sand and water that had settled get dropped back in as falling grains, so a
+    // resize keeps them (they re-settle on the new screen) instead of wiping them.
+    if (this.grid && this.sandCount) {
+      const { grid, gw, C } = this;
+      for (let j = 0; j < grid.length; j++) {
+        if (grid[j]) this.add(((j % gw) + 0.5) * C, (((j / gw) | 0) + 0.5) * C, 0, 0, grid[j]);
+      }
+    }
     this.dpr = Math.min(2, devicePixelRatio || 1);
     this.canvas.width = Math.round(W * this.dpr);
     this.canvas.height = Math.round(H * this.dpr);
+    // The canvas has twice as many pixels as the page on a Retina screen. Without
+    // an explicit display size the browser shows it at that pixel size, so
+    // everything on it lands at twice its real position (off to the right).
+    this.canvas.style.width = W + 'px';
+    this.canvas.style.height = H + 'px';
     // A grain is a whole number of device pixels, so scaled displays (125%, 150%)
     // don't draw some grains wider than others and make the sand shimmer.
     this.D = Math.max(2, Math.round((W * H > 2.6e6 ? 4 : 3) * this.dpr));

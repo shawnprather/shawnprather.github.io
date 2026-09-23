@@ -66,9 +66,12 @@ export class Ascii {
     const { W, H } = this.world;
     const dpr = Math.min(2, devicePixelRatio || 1);
     const ctx = this.ctx;
-    if (this.canvas.width !== Math.round(W * dpr)) {
+    if (this.canvas.width !== Math.round(W * dpr) || this.canvas.height !== Math.round(H * dpr)) {
       this.canvas.width = Math.round(W * dpr);
       this.canvas.height = Math.round(H * dpr);
+      // Display size must be set explicitly, or a Retina screen shows it at 2x.
+      this.canvas.style.width = W + 'px';
+      this.canvas.style.height = H + 'px';
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = FONT;

@@ -33,6 +33,17 @@ export class World {
     });
     Events.on(this.engine, 'afterUpdate', () => this.afterStepHooks.forEach((f) => f()));
     addEventListener('resize', () => this.onResize());
+    this.watchPixelRatio();
+  }
+
+  // Dragging the window between a Retina screen and a normal one changes the
+  // pixel ratio, which doesn't always fire a resize. Treat it as one.
+  watchPixelRatio() {
+    const mq = matchMedia(`(resolution: ${devicePixelRatio}dppx)`);
+    mq.addEventListener('change', () => {
+      this.onResize();
+      this.watchPixelRatio();
+    }, { once: true });
   }
 
   on(name, fn) { (this.listeners[name] ||= []).push(fn); }
